@@ -384,12 +384,9 @@ static void audioInitProc(void* /*arg*/) {
 }
 
 void audioInitAsync() {
-    // Priority 0x3f = lower than main thread (0x30) so rendering is never starved.
-    // Affinity -2 = any available core. detached = true: thread frees itself on exit.
-    Thread t = threadCreate(audioInitProc, nullptr, 64 * 1024, 0x3f, -2, true);
-    if (!t) {
-        // threadCreate failed (rare) — fall back to synchronous init on main thread
-        audioInit();
-        audioApplyVolumes();
-    }
+    // Run audio init in a background thread so the main game loop never blocks.
+    // Priority 0x3f (lower than main thread 0x30) so rendering is never starved.
+    // If threadCreate fails for any reason, audio stays silently disabled (g_ready
+    // stays false) — the game runs normally, just without sound.
+    threadCreate(audioInitProc, nullptr, 64 * 1024, 0x3f, -2, true);
 }
