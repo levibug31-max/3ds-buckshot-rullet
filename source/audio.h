@@ -27,7 +27,8 @@ enum Sfx {
     SFX_COUNT
 };
 
-void audioInit();
+void audioInit();        // synchronous — blocks until done
+void audioInitAsync();   // starts init on a background thread; returns immediately
 void audioExit();
 void audioPlay(Sfx s);
 void audioSetMusic(bool on);     // enable/disable ambient drone

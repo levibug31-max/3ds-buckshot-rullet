@@ -42,21 +42,22 @@ s16* alloc16(u32 frames) {
 // All buffers are mono s16 @ SAMPLE_RATE.
 
 void synthNoise(s16* buf, u32 n, float dur, float amp, float decay, float lp) {
-    // band-limited-ish noise burst with a one-pole lowpass + exp decay
+    if (!buf) return;
     float last = 0.f;
     for (u32 i = 0; i < n; ++i) {
         float t = (float)i / SAMPLE_RATE;
         if (t > dur) break;
         float env = expf(-t * decay);
         float white = frand() * 2.f - 1.f;
-        last += (white - last) * lp;          // lowpass
+        last += (white - last) * lp;
         float s = last * env * amp;
         buf[i] = (s16)(clampf(s, -1.f, 1.f) * 32000);
     }
 }
 
 void synthTone(s16* buf, u32 n, float dur, float f0, float f1, float amp,
-               float decay, int wave /*0 sine 1 square 2 saw*/) {
+               float decay, int wave) {
+    if (!buf) return;
     float phase = 0.f;
     for (u32 i = 0; i < n; ++i) {
         float t = (float)i / SAMPLE_RATE;
@@ -72,7 +73,6 @@ void synthTone(s16* buf, u32 n, float dur, float f0, float f1, float amp,
         }
         float env = expf(-t * decay);
         float s = v * env * amp;
-        // soft attack to avoid clicks
         if (t < 0.004f) s *= t / 0.004f;
         buf[i] = (s16)(clampf(buf[i]/32000.f + s, -1.f, 1.f) * 32000);
     }
@@ -369,9 +369,27 @@ void audioSetMusic(bool on) {
 void audioUpdate() {
     if (!g_ready) return;
     g_musicTarget = g_musicOn ? settingsMusicGain() : 0.f;
-    // smooth ramp to avoid pops on volume changes
     g_musicCur += (g_musicTarget - g_musicCur) * 0.08f;
     float mix[12]; memset(mix, 0, sizeof(mix));
     mix[0] = mix[1] = g_musicCur;
     ndspChnSetMix(MUSIC_CHANNEL, mix);
+}
+
+// Background thread entry: calls audioInit then returns.
+// If ndspInit() hangs, this thread blocks permanently but the main game
+// continues running (g_ready stays false → all audio plays are silently skipped).
+static void audioInitProc(void* /*arg*/) {
+    audioInit();
+    audioApplyVolumes();
+}
+
+void audioInitAsync() {
+    // Priority 0x3f = lower than main thread (0x30) so rendering is never starved.
+    // Affinity -2 = any available core. detached = true: thread frees itself on exit.
+    Thread t = threadCreate(audioInitProc, nullptr, 64 * 1024, 0x3f, -2, true);
+    if (!t) {
+        // threadCreate failed (rare) — fall back to synchronous init on main thread
+        audioInit();
+        audioApplyVolumes();
+    }
 }

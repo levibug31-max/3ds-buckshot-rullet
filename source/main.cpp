@@ -1028,13 +1028,32 @@ int main(int argc, char** argv){
     g_top = C2D_CreateScreenTarget(GFX_TOP, GFX_LEFT);
     g_bot = C2D_CreateScreenTarget(GFX_BOTTOM, GFX_LEFT);
     gfxTextInit();
-
     settingsLoad();
-    audioInit();
-    audioApplyVolumes();
     g_set = buildSettings();
-
     srand((unsigned)(svcGetSystemTick()&0xFFFFFFFF));
+
+    // Render one frame immediately so the HOME-menu loading spinner is dismissed
+    // and the user sees the game title before audio synthesis begins.
+    {
+        C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
+        gfxTextFrame();
+        C2D_TargetClear(g_top, Pal::bg1);
+        C2D_SceneBegin(g_top);
+        RS(0, 0, TOP_W, SCR_H, Pal::bg0);
+        drawText(TOP_W/2, 80,  1.1f, Pal::text,    ALN_C, "BUCKSHOT");
+        drawText(TOP_W/2, 130, 1.1f, Pal::red,     ALN_C, "ROULETTE");
+        drawText(TOP_W/2, 190, 0.45f, Pal::textMute, ALN_C, "loading...");
+        C2D_TargetClear(g_bot, Pal::bg1);
+        C2D_SceneBegin(g_bot);
+        RS(0, 0, BOT_W, SCR_H, Pal::bg0);
+        drawText(BOT_W/2, SCR_H/2, 0.42f, Pal::textMute, ALN_C, "please wait");
+        C3D_FrameEnd(0);
+    }
+
+    // Start audio synthesis in a background thread so the game is never blocked
+    // by ndspInit() or PCM buffer generation. The main loop starts immediately;
+    // audioPlay() silently no-ops until the thread sets g_ready = true.
+    audioInitAsync();
 
     u64 last = svcGetSystemTick();
 
