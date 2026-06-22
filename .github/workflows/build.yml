@@ -1,0 +1,60 @@
+name: build
+
+on:
+  push:
+    branches: [ "claude/buckshot-roulette-3ds-metwyt" ]
+    tags: [ "v*" ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compile (.3dsx / .elf / .smdh) with devkitARM
+        run: |
+          docker run --rm -v "$PWD":/proj -w /proj devkitpro/devkitarm:latest bash -lc '
+            export DEVKITPRO=/opt/devkitpro
+            export DEVKITARM=/opt/devkitpro/devkitARM
+            export PATH=$DEVKITARM/bin:$DEVKITPRO/tools/bin:$PATH
+            make -j2'
+
+      - name: Package installable .cia
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          sudo chown -R "$USER" . || true
+          chmod +x build_cia.sh
+          ./build_cia.sh
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: BuckshotRoulette
+          path: |
+            BuckshotRoulette.3dsx
+            BuckshotRoulette.cia
+
+      - name: Publish / update Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0
+          name: Buckshot Roulette 3DS
+          body: |
+            Installable build of the Buckshot Roulette 3DS homebrew port.
+
+            - **BuckshotRoulette.cia** — install with FBI (QR scan or local file)
+            - **BuckshotRoulette.3dsx** — run from the Homebrew Launcher
+
+            Original clean-room implementation of the gameplay mechanics with
+            original art, audio and code.
+          files: |
+            BuckshotRoulette.3dsx
+            BuckshotRoulette.cia
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

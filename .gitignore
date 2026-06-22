@@ -1,0 +1,11 @@
+# build intermediates
+build/
+*.elf
+*.map
+*.bnr
+*.lst
+
+# downloaded packaging tools (fetched by build_cia.sh / CI)
+tools/
+
+# keep the shippable artifacts (BuckshotRoulette.cia / .3dsx / .smdh) tracked
