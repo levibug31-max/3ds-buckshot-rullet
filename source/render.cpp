@@ -54,7 +54,8 @@ void drawPanel(float x, float y, float w, float h, u32 fill, u32 border){
 }
 
 void drawBar(float x, float y, float w, float h, float frac, u32 fg, u32 bg){
-    if (frac < 0) frac = 0; if (frac > 1) frac = 1;
+    if (frac < 0) frac = 0;
+    if (frac > 1) frac = 1;
     RS(x, y, w, h, bg);
     RS(x, y, w*frac, h, fg);
 }

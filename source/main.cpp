@@ -489,7 +489,8 @@ static void renderSettings(){
     float viewH = SCR_H-50;
     int maxRows = (int)(viewH/rh);
     int first = setSel - maxRows/2; if (first<0) first=0;
-    if (first> total-maxRows) first = total-maxRows; if (first<0) first=0;
+    if (first> total-maxRows) first = total-maxRows;
+    if (first<0) first=0;
     for (int i=first;i<total && (i-first)<maxRows;i++){
         SetItem& s=g_set[i];
         float y=top+(i-first)*rh;
@@ -610,7 +611,8 @@ static void handleGameInput(u32 kDown){
         if (uiSel>=4&&uiSel<8) uiSel-=4; else if (uiSel==9) uiSel=8;
         audioPlay(SFX_MOVE);
     }
-    if (uiSel<0) uiSel=0; if (uiSel>9) uiSel=9;
+    if (uiSel<0) uiSel=0;
+    if (uiSel>9) uiSel=9;
     if (kDown&KEY_A) useSelected();
 }
 

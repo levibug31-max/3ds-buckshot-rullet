@@ -25,47 +25,47 @@ if [ -n "${GITHUB_TOKEN:-}" ]; then
   AUTH=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
 fi
 
-fetch_latest_asset() {
-  # $1 = repo, $2 = grep pattern for the asset name, $3 = output file
-  local repo="$1" pattern="$2" out="$3"
-  echo "Resolving latest asset for $repo matching '$pattern'..."
-  local url
-  url=$(curl -sL "${AUTH[@]}" "https://api.github.com/repos/${repo}/releases/latest" \
-        | grep -oE '"browser_download_url": *"[^"]*"' \
-        | sed -E 's/.*"(https[^"]*)".*/\1/' \
-        | grep -iE "$pattern" | head -n1 || true)
-  if [ -z "$url" ]; then
-    echo "Could not resolve asset url for $repo / $pattern" >&2
-    return 1
-  fi
-  echo "  -> $url"
-  curl -sL "${AUTH[@]}" -o "$out" "$url"
+resolve_asset_url() {
+  # $1 = repo, $2 = grep pattern for the asset name  ->  prints url
+  local repo="$1" pattern="$2"
+  curl -sL "${AUTH[@]}" "https://api.github.com/repos/${repo}/releases/latest" \
+    | grep -oE '"browser_download_url": *"[^"]*"' \
+    | sed -E 's/.*"(https[^"]*)".*/\1/' \
+    | grep -iE "$pattern" | head -n1 || true
 }
 
-# ---- makerom ----
-if [ ! -x "$TOOLS/makerom" ]; then
-  echo "Fetching makerom..."
-  fetch_latest_asset "3DSGuy/Project_CTR" "makerom.*(ubuntu|linux).*x86_64.*\.zip" "$TOOLS/makerom.zip"
-  ( cd "$TOOLS" && unzip -o makerom.zip >/dev/null && rm -f makerom.zip )
-  chmod +x "$TOOLS/makerom"
-fi
+# Download an archive (zip or tar.gz) and extract `binname` into $TOOLS.
+fetch_tool() {
+  local binname="$1"; shift               # remaining args: repo:pattern pairs
+  [ -x "$TOOLS/$binname" ] && return 0
+  echo "Fetching $binname..."
+  local url=""
+  while [ $# -ge 2 ]; do
+    url=$(resolve_asset_url "$1" "$2")
+    if [ -n "$url" ]; then break; fi
+    echo "  (no match for $1 / $2)"
+    shift 2
+  done
+  if [ -z "$url" ]; then echo "Could not resolve $binname download" >&2; return 1; fi
+  echo "  -> $url"
+  local tmp; tmp=$(mktemp -d)
+  case "$url" in
+    *.tar.gz|*.tgz) curl -sL "${AUTH[@]}" -o "$tmp/a.tgz" "$url"; tar -xzf "$tmp/a.tgz" -C "$tmp" ;;
+    *)              curl -sL "${AUTH[@]}" -o "$tmp/a.zip" "$url"; unzip -o "$tmp/a.zip" -d "$tmp" >/dev/null ;;
+  esac
+  local found; found=$(find "$tmp" -type f -name "$binname" | head -n1 || true)
+  if [ -z "$found" ]; then echo "binary $binname not found in archive" >&2; return 1; fi
+  cp "$found" "$TOOLS/$binname"
+  chmod +x "$TOOLS/$binname"
+  rm -rf "$tmp"
+}
 
-# ---- bannertool ----
-if [ ! -x "$TOOLS/bannertool" ]; then
-  echo "Fetching bannertool..."
-  if fetch_latest_asset "carstene1ns/3ds-bannertool" "linux.*x86_64.*\.zip" "$TOOLS/bannertool.zip"; then
-    :
-  else
-    fetch_latest_asset "Steveice10/bannertool" "linux.*x86_64.*\.zip" "$TOOLS/bannertool.zip"
-  fi
-  ( cd "$TOOLS" && unzip -o bannertool.zip >/dev/null && rm -f bannertool.zip )
-  # archive may nest the binary in a folder; normalize it
-  if [ ! -f "$TOOLS/bannertool" ]; then
-    found=$(find "$TOOLS" -type f -name bannertool | head -n1 || true)
-    [ -n "$found" ] && cp "$found" "$TOOLS/bannertool"
-  fi
-  chmod +x "$TOOLS/bannertool"
-fi
+fetch_tool makerom \
+  "3DSGuy/Project_CTR" "makerom.*(ubuntu|linux).*x86_64.*\.zip"
+
+fetch_tool bannertool \
+  "carstene1ns/3ds-bannertool" "linux.*\.(tar\.gz|zip)" \
+  "Steveice10/bannertool" "linux.*\.zip"
 
 echo "Building banner..."
 "$TOOLS/bannertool" makebanner \
