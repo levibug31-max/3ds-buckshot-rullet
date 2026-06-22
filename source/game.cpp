@@ -224,7 +224,7 @@ static ActionResult resolveShot(Game& g, Actor shooter, Actor target){
     if (live){
         Side& tg = sideOf(g, target);
         tg.lives -= dmg;
-        audioPlay(SFX_LIVE);
+        // gunshot SFX is played by the UI at the animation's fire moment
         if (target == ACTOR_PLAYER)
             snprintf(buf,sizeof(buf), self ? "You shoot yourself. LIVE! (-%d)" : "The Dealer shoots you. LIVE! (-%d)", dmg);
         else
@@ -232,7 +232,7 @@ static ActionResult resolveShot(Game& g, Actor shooter, Actor target){
         g.pushLog(buf);
         r.text = buf;
     } else {
-        audioPlay(SFX_BLANK);
+        // dry-fire (blank) SFX is played by the UI at the animation's fire moment
         if (target == ACTOR_PLAYER)
             snprintf(buf,sizeof(buf), self ? "You shoot yourself. Blank." : "The Dealer shoots you. Blank.");
         else

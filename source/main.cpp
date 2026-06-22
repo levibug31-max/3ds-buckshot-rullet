@@ -59,6 +59,21 @@ static float overDelay = 0.f;
 static bool  adrenMode = false;
 static int   adrenSel = 0;
 
+// shot / gun-aim animation (pre-resolved; the visuals play out over ~0.65s)
+static bool         shotActive = false;
+static float        shotT      = 0.f;     // seconds since the shot began
+static bool         shotFired  = false;   // fire-moment fx already triggered
+static ActionResult shotResult;
+static Actor        shotShooter = ACTOR_PLAYER;
+static Actor        shotTarget  = ACTOR_DEALER;
+
+// smoothed health (lerps toward the real value so hits land with the flash)
+static float dispPlayerLives = 0.f;
+static float dispDealerLives = 0.f;
+
+// shell-loading animation
+static int   prevShellsLeft = 0;
+
 // ---------------------------------------------------------------------------
 static float frand(){ return (float)rand()/(float)RAND_MAX; }
 
@@ -76,18 +91,19 @@ static void spawnSparks(float x, float y, int n, u32 col){
     }
 }
 
-static void applyShotFx(const ActionResult& r, Actor target){
+// fire-moment effects, with sparks emitted from the muzzle position (mx,my)
+static void applyShotFx(const ActionResult& r, Actor target, float mx, float my){
     fx.recoil = 1.0f;
     if (r.fired && r.wasLive){
         if (g_settings.muzzleFlash) fx.flash = 1.0f;
         if (g_settings.screenShake) fx.shake = 9.0f;
         if (target==ACTOR_DEALER) fx.dealerHurt = 1.0f; else fx.playerHurt = 1.0f;
-        spawnSparks(280, 150, 22, Pal::amber);
-        spawnSparks(280, 150, 10, Pal::red);
+        spawnSparks(mx, my, 22, Pal::amber);
+        spawnSparks(mx, my, 10, Pal::red);
     } else if (r.fired){
         if (g_settings.muzzleFlash) fx.flash = 0.35f;
         if (g_settings.screenShake) fx.shake = 3.0f;
-        spawnSparks(280, 150, 6, Pal::textDim);
+        spawnSparks(mx, my, 6, Pal::textDim);
     }
 }
 
@@ -136,207 +152,317 @@ static void drawHealthPips(float x, float y, int lives, int maxLives, u32 col, f
     }
 }
 
+// The Dealer: a pale, mannequin-like figure seated across the table, facing you.
 static void drawDealer(float cx, float cy, float hurt){
-    u32 coat  = C2D_Color32(0x16,0x12,0x16,0xFF);
-    u32 coatE = C2D_Color32(0x0e,0x0c,0x10,0xFF);
-    u32 skin  = C2D_Color32(0x16,0x14,0x16,0xFF);
+    u32 suit  = C2D_Color32(0x12,0x10,0x14,0xFF);  // near-black suit
+    u32 suitE = C2D_Color32(0x08,0x07,0x0a,0xFF);
+    u32 bone  = C2D_Color32(0xcf,0xc8,0xba,0xFF);  // pale bone skin
+    u32 boneS = C2D_Color32(0x9c,0x95,0x88,0xFF);  // shaded bone
+    u32 hollow= C2D_Color32(0x14,0x10,0x12,0xFF);  // eye/socket cavity
 
-    // chair back
-    RS(cx-46, cy-64, 92, 12, C2D_Color32(0x20,0x18,0x1c,0xFF));
-    RS(cx-42, cy-56, 84, 6,  C2D_Color32(0x2e,0x24,0x28,0xFF));
-    RS(cx-44, cy-52, 88, 100, C2D_Color32(0x18,0x14,0x18,0xFF)); // chair body (behind torso)
+    // chair back behind the figure
+    RS(cx-50, cy-66, 100, 10, C2D_Color32(0x1c,0x16,0x18,0xFF));
+    RS(cx-46, cy-58, 92,  64, C2D_Color32(0x14,0x11,0x13,0xFF));
 
-    // floor shadow
-    C2D_DrawEllipse(cx-46, cy+44, 0.1f, 92, 18,
-        C2D_Color32(0,0,0,100), C2D_Color32(0,0,0,100),
-        C2D_Color32(0,0,0,0),   C2D_Color32(0,0,0,0));
+    // arms / sleeves reaching onto the table
+    RS(cx-60, cy+6, 24, 40, suit);
+    RS(cx+36, cy+6, 24, 40, suit);
+    RS(cx-60, cy+6, 2, 40, suitE);
+    RS(cx+58, cy+6, 2, 40, suitE);
 
-    // arms (behind torso)
-    RS(cx-62, cy+6,  26, 38, coat);
-    RS(cx+36, cy+6,  26, 38, coat);
-    // coat sleeve edge
-    RS(cx-62, cy+6,  2, 38, coatE);
-    RS(cx+60, cy+6,  2, 38, coatE);
+    // pale skeletal hands resting on the table
+    for (int s=-1; s<=1; s+=2){
+        float hx = cx + s*48;
+        C2D_DrawCircleSolid(hx, cy+44, 0.28f, 9, bone);
+        for (int f=0; f<4; f++) RS(hx-7+f*4, cy+44, 3, 9, bone);   // fingers
+        RS(hx-9+ (s>0?16:0), cy+46, 3, 7, bone);                   // thumb
+    }
 
-    // hands on table
-    C2D_DrawCircleSolid(cx-50, cy+42, 0.28f, 10, skin);
-    C2D_DrawCircleSolid(cx+50, cy+42, 0.28f, 10, skin);
-    C2D_DrawCircleSolid(cx-54, cy+44, 0.29f, 6, skin);
-    C2D_DrawCircleSolid(cx+54, cy+44, 0.29f, 6, skin);
+    // torso / suit jacket
+    drawPanel(cx-36, cy-8, 72, 56, suit, C2D_Color32(0x2a,0x22,0x26,0xFF));
 
-    // torso / coat body
-    drawPanel(cx-36, cy-8, 72, 56, coat, Pal::line);
+    // white shirt + collar V
+    u32 shirt = C2D_Color32(0xc4,0xc0,0xb8,0xFF);
+    C2D_DrawTriangle(cx-12,cy-8, shirt, cx+12,cy-8, shirt, cx, cy+18, shirt, 0.3f);
+    // black tie
+    u32 tie = C2D_Color32(0x0c,0x0a,0x0e,0xFF);
+    C2D_DrawTriangle(cx-4,cy-4, tie, cx+4,cy-4, tie, cx+1, cy+30, tie, 0.34f);
+    RS(cx-3, cy-7, 6, 4, tie);
 
-    // white shirt front strip
-    u32 shirt = C2D_Color32(0xd0,0xcc,0xc8,0xFF);
-    RS(cx-6, cy-8, 12, 38, shirt);
-    RS(cx-6, cy-8, 12,  2, C2D_Color32(0xb0,0xac,0xa8,0xFF)); // collar edge
+    // lapels
+    C2D_DrawTriangle(cx-36,cy-8, suit, cx-8,cy-8, suit, cx-22,cy+30, suitE, 0.22f);
+    C2D_DrawTriangle(cx+36,cy-8, suit, cx+8,cy-8, suit, cx+22,cy+30, suitE, 0.22f);
+    // shoulders
+    C2D_DrawTriangle(cx-36,cy+4, suit, cx-58,cy+42, suit, cx-26,cy+46, suit, 0.21f);
+    C2D_DrawTriangle(cx+36,cy+4, suit, cx+58,cy+42, suit, cx+26,cy+46, suit, 0.21f);
 
-    // coat lapels (overlaid triangles that part on the chest)
-    C2D_DrawTriangle(cx-36, cy-8,  coat, cx-6, cy-8, coat, cx-20, cy+32, coatE, 0.22f);
-    C2D_DrawTriangle(cx+36, cy-8,  coat, cx+6, cy-8, coat, cx+20, cy+32, coatE, 0.22f);
+    // pale neck
+    RS(cx-7, cy-18, 14, 12, boneS);
 
-    // red tie
-    u32 tie = C2D_Color32(0x8c,0x14,0x14,0xFF);
-    C2D_DrawTriangle(cx-4, cy-6, tie, cx+4, cy-6, tie, cx+1, cy+26, tie, 0.32f);
-    // tie knot
-    RS(cx-3, cy-8, 6, 4, C2D_Color32(0xa0,0x1a,0x1a,0xFF));
+    // skull-like head (pale, elongated)
+    C2D_DrawEllipse(cx-17, cy-50, 0.3f, 34, 40, bone,bone,bone,bone);
+    // cheek shading
+    C2D_DrawEllipse(cx-17, cy-38, 0.31f, 34, 18, boneS,boneS,
+                    C2D_Color32(0xcf,0xc8,0xba,0x00),C2D_Color32(0xcf,0xc8,0xba,0x00));
+    // brow ridge shadow
+    RS(cx-13, cy-40, 26, 2, boneS);
 
-    // coat buttons
-    for (int bi=0; bi<3; bi++)
-        C2D_DrawCircleSolid(cx, cy+4+bi*13, 0.36f, 2.2f, C2D_Color32(0x38,0x2e,0x32,0xFF));
+    // hollow eye sockets
+    C2D_DrawEllipse(cx-15, cy-44, 0.4f, 12, 11, hollow,hollow,hollow,hollow);
+    C2D_DrawEllipse(cx+3,  cy-44, 0.4f, 12, 11, hollow,hollow,hollow,hollow);
 
-    // shoulders humps
-    C2D_DrawTriangle(cx-36, cy+6, coat, cx-60, cy+40, coat, cx-28, cy+46, coat, 0.21f);
-    C2D_DrawTriangle(cx+36, cy+6, coat, cx+60, cy+40, coat, cx+28, cy+46, coat, 0.21f);
+    // glowing eyes inside the sockets
+    float ge = 0.40f + 0.60f*fx.eyeGlow;
+    u32 halo = C2D_Color32(0xff,(u8)(0x40*ge),(u8)(0x20*ge),(u8)(70*ge));
+    u32 core = C2D_Color32((u8)(0xd0+0x2f*ge),(u8)(0x20*ge),(u8)(0x20*ge),0xFF);
+    C2D_DrawCircleSolid(cx-9, cy-38, 0.42f, 5.0f, halo);
+    C2D_DrawCircleSolid(cx+9, cy-38, 0.42f, 5.0f, halo);
+    C2D_DrawCircleSolid(cx-9, cy-38, 0.45f, 2.6f, core);
+    C2D_DrawCircleSolid(cx+9, cy-38, 0.45f, 2.6f, core);
 
-    // neck
-    RS(cx-6, cy-16, 12, 12, skin);
+    // nasal cavity
+    C2D_DrawTriangle(cx, cy-34, hollow, cx-3, cy-28, hollow, cx+3, cy-28, hollow, 0.44f);
 
-    // head
-    C2D_DrawCircleSolid(cx, cy-28, 0.3f, 18, skin);
-    // chin / jaw
-    RS(cx-10, cy-18, 20, 10, skin);
+    // gritted-teeth mouth line
+    RS(cx-11, cy-24, 22, 5, hollow);
+    for (int t=0;t<6;t++) RS(cx-10+t*4, cy-24, 1, 5, bone);
 
-    // hat brim
-    RS(cx-28, cy-42, 56, 5, C2D_Color32(0x08,0x06,0x08,0xFF));
-    // hat crown
-    RS(cx-17, cy-62, 34, 22, C2D_Color32(0x0c,0x0a,0x0c,0xFF));
-    // hat band
-    RS(cx-17, cy-44, 34, 4, C2D_Color32(0x28,0x1c,0x20,0xFF));
-    // hat top
-    RS(cx-15, cy-64, 30, 3, C2D_Color32(0x08,0x06,0x08,0xFF));
-
-    // glowing red eyes
-    float ge = 0.42f + 0.58f*fx.eyeGlow;
-    u32 eyeHalo = C2D_Color32(0xff, (u8)(0x50*ge), (u8)(0x10*ge), (u8)(50*ge));
-    u32 eyeCore = C2D_Color32((u8)(0xc0+0x3f*ge), (u8)(0x18*ge), (u8)(0x18*ge), 0xFF);
-    C2D_DrawCircleSolid(cx-8, cy-28, 0.37f, 5.5f, eyeHalo);
-    C2D_DrawCircleSolid(cx+8, cy-28, 0.37f, 5.5f, eyeHalo);
-    C2D_DrawCircleSolid(cx-8, cy-28, 0.42f, 3.0f, eyeCore);
-    C2D_DrawCircleSolid(cx+8, cy-28, 0.42f, 3.0f, eyeCore);
-    // eye glint
-    C2D_DrawCircleSolid(cx-7, cy-30, 0.5f, 1.0f, C2D_Color32(0xff,0xd0,0xd0,0xA0));
-    C2D_DrawCircleSolid(cx+9, cy-30, 0.5f, 1.0f, C2D_Color32(0xff,0xd0,0xd0,0xA0));
-
-    // hurt flash
+    // hurt flash overlay
     if (hurt>0.01f)
-        RS(cx-64, cy-66, 128, 128, C2D_Color32(0xcc,0x1e,0x1e,(u8)(130*hurt)));
+        RS(cx-58, cy-72, 116, 128, C2D_Color32(0xcc,0x1e,0x1e,(u8)(130*hurt)));
 }
 
-static void drawShotgun(float cx, float cy, float recoil, float flash){
-    float ox = -recoil*12.f;
-    cx += ox;
+// ---------------------------------------------------------------------------
+//  Rotatable shotgun (drawn as rotated quads so it can aim in any direction)
+// ---------------------------------------------------------------------------
+struct V2 { float x, y; };
+static inline V2 rotP(V2 p, V2 piv, float c, float s){
+    float dx=p.x-piv.x, dy=p.y-piv.y;
+    return { piv.x + dx*c - dy*s, piv.y + dx*s + dy*c };
+}
+static inline void quad(V2 a,V2 b,V2 c,V2 d,u32 col){
+    C2D_DrawTriangle(a.x,a.y,col, b.x,b.y,col, c.x,c.y,col, 0.5f);
+    C2D_DrawTriangle(a.x,a.y,col, c.x,c.y,col, d.x,d.y,col, 0.5f);
+}
+// local-space rectangle [x0,x1]x[y0,y1] rotated about pivot and drawn
+static void rrect(V2 piv, float c, float s, float x0,float y0,float x1,float y1, u32 col){
+    V2 a=rotP({piv.x+x0,piv.y+y0},piv,c,s);
+    V2 b=rotP({piv.x+x1,piv.y+y0},piv,c,s);
+    V2 d=rotP({piv.x+x1,piv.y+y1},piv,c,s);
+    V2 e=rotP({piv.x+x0,piv.y+y1},piv,c,s);
+    quad(a,b,d,e,col);
+}
+// muzzle world position for a given pose (local muzzle tip at +x)
+static V2 gunMuzzle(V2 piv, float ang, float recoil){
+    float c=cosf(ang), s=sinf(ang);
+    return rotP({piv.x+58.f-recoil*12.f, piv.y}, piv, c, s);
+}
+// gun pointing along +x in local space; rotate by ang about piv.
+static void drawGunRotated(V2 piv, float ang, float recoil, float flash){
+    float c=cosf(ang), s=sinf(ang);
+    float r = recoil*12.f;                  // recoil pushes the gun backward (-x)
+    auto R=[&](float x0,float y0,float x1,float y1,u32 col){ rrect(piv,c,s,x0-r,y0,x1-r,y1,col); };
+
     u32 steel  = C2D_Color32(0x72,0x74,0x7c,0xFF);
     u32 steelD = C2D_Color32(0x3e,0x40,0x46,0xFF);
-    u32 steelH = C2D_Color32(0xa8,0xaa,0xb2,0xFF);
+    u32 steelH = C2D_Color32(0xaa,0xac,0xb4,0xFF);
     u32 wood   = C2D_Color32(0x58,0x38,0x1e,0xFF);
-    u32 woodD  = C2D_Color32(0x38,0x22,0x10,0xFF);
+    u32 woodD  = C2D_Color32(0x36,0x20,0x10,0xFF);
+    u32 dark   = C2D_Color32(0x10,0x10,0x16,0xFF);
 
-    // stock (butt)
-    C2D_DrawTriangle(cx-92,cy-5,wood, cx-92,cy+16,wood, cx-62,cy+12,woodD, 0.18f);
-    RS(cx-68, cy-8, 32, 20, wood);
-    // wood grain lines on stock
-    RS(cx-66, cy-6, 28, 1, woodD);
-    RS(cx-66, cy-2, 28, 1, woodD);
-    RS(cx-66, cy+2, 26, 1, woodD);
+    // stock
+    R(-50,-7,-30,9, wood);
+    R(-50,-7,-30,-4, woodD);            // top shade
+    // grip / trigger area
+    R(-32,-9,-12,11, steelD);
+    R(-30,-4,-16,4, dark);              // ejection port
+    R(-32,-9,-12,-6, steelH);
+    // barrel
+    R(-12,-7,52,5, steel);
+    R(-12,-7,52,-4, steelH);           // top highlight
+    R(-12,2,52,5, steelD);             // bottom shade
+    R(-12,-5,52,-4, steelH);           // rib line
+    // pump/foregrip
+    R(0,4,22,11, wood);
+    R(0,4,22,6, woodD);
+    // muzzle cap
+    R(52,-8,60,6, steelD);
+    R(52,-8,60,-5, steelH);
 
-    // trigger guard
-    RS(cx-52, cy+10, 2, 10, steelD);
-    C2D_DrawCircleSolid(cx-44, cy+18, 0.22f, 9, steelD);
-    C2D_DrawCircleSolid(cx-44, cy+18, 0.25f, 7, Pal::bg0);
-    RS(cx-36, cy+10, 2, 10, steelD);
-
-    // receiver box
-    RS(cx-40, cy-10, 36, 22, steelD);
-    RS(cx-40, cy-10, 36,  3, steelH); // top glint
-    RS(cx-40, cy+10, 36,  2, C2D_Color32(0x20,0x22,0x28,0xFF)); // bottom shadow
-    // ejection port
-    RS(cx-30, cy-4, 16, 8, C2D_Color32(0x18,0x18,0x20,0xFF));
-
-    // barrel (top barrel + bottom)
-    RS(cx-8, cy-8, 98, 14, steel);
-    RS(cx-8, cy-8, 98,  3, steelH); // top highlight
-    RS(cx-8, cy+3,  98,  3, steelD); // bottom shadow
-    // barrel rib (top center line)
-    RS(cx-8, cy-5,  98, 1, steelH);
-
-    // pump (foregrip)
-    RS(cx+4, cy+4, 30, 10, wood);
-    RS(cx+4, cy+4, 30,  1, woodD);
-    // pump texture
-    for (int i=0;i<6;i++) RS(cx+6+i*4, cy+12, 1, 2, woodD);
-
-    // muzzle end cap
-    RS(cx+88, cy-10, 8, 18, steelD);
-    RS(cx+88, cy-10, 8,  3, steelH);
-    // barrel hole
-    C2D_DrawCircleSolid(cx+94, cy-1, 0.92f, 5, C2D_Color32(0x08,0x08,0x10,0xFF));
-
-    // front sight bead
-    C2D_DrawCircleSolid(cx+82, cy-10, 0.88f, 2, steelH);
-
-    // muzzle flash
+    // muzzle flash at the barrel tip, oriented along the gun
     if (flash>0.02f){
-        float s = flash;
-        u32 f0 = C2D_Color32(0xff,0xff,0xe0,(u8)(180*s));
-        u32 f1 = C2D_Color32(0xff,0xd0,0x60,(u8)(230*s));
-        u32 f2 = C2D_Color32(0xff,0x80,0x20,(u8)(170*s));
-        u32 ft = C2D_Color32(0xff,0xb0,0x30,0);
-        C2D_DrawCircleSolid(cx+96, cy-1, 0.91f, 14*s+5, f2);
-        C2D_DrawCircleSolid(cx+96, cy-1, 0.93f, 8*s+3,  f1);
-        C2D_DrawCircleSolid(cx+96, cy-1, 0.96f, 4*s+1,  f0);
-        C2D_DrawTriangle(cx+90,cy-9,f1, cx+90,cy+7,f1, cx+98+30*s,cy-1,ft, 0.92f);
-        C2D_DrawTriangle(cx+90,cy-5,f0, cx+90,cy+3,f0, cx+96+20*s,cy-1,ft, 0.94f);
+        V2 m = gunMuzzle(piv, ang, recoil);
+        float k = flash;
+        // forward direction
+        float fx2=c, fy2=s;
+        u32 f0=C2D_Color32(0xff,0xff,0xe0,(u8)(190*k));
+        u32 f1=C2D_Color32(0xff,0xd0,0x60,(u8)(235*k));
+        u32 f2=C2D_Color32(0xff,0x80,0x20,(u8)(170*k));
+        u32 ft=C2D_Color32(0xff,0xb0,0x30,0);
+        C2D_DrawCircleSolid(m.x, m.y, 0.91f, 14*k+5, f2);
+        C2D_DrawCircleSolid(m.x, m.y, 0.93f, 8*k+3,  f1);
+        C2D_DrawCircleSolid(m.x, m.y, 0.96f, 4*k+1,  f0);
+        // flame cone
+        float px=-fy2, py=fx2;          // perpendicular
+        float len = 30*k+10;
+        C2D_DrawTriangle(m.x+px*8, m.y+py*8, f1,
+                         m.x-px*8, m.y-py*8, f1,
+                         m.x+fx2*len, m.y+fy2*len, ft, 0.94f);
     }
+}
+
+// Returns the aim pose (pivot + angle) for a shot, given how far the gun is
+// raised (a: 0 = resting on the table, 1 = fully aimed at the target).
+static void shotPose(Actor shooter, Actor target, float a, V2& piv, float& ang){
+    V2 rest = { TOP_W/2.0f, 176.f };
+    V2 aimP; float aimA;
+    if (shooter==ACTOR_PLAYER && target==ACTOR_DEALER){ aimP={TOP_W/2.0f, 205.f}; aimA=-1.5708f; }
+    else if (shooter==ACTOR_PLAYER)                   { aimP={TOP_W/2.0f, 198.f}; aimA= 1.5708f; }
+    else if (target==ACTOR_PLAYER)                    { aimP={TOP_W/2.0f, 120.f}; aimA= 1.5708f; }
+    else                                              { aimP={TOP_W/2.0f, 138.f}; aimA=-1.5708f; }
+    piv.x = rest.x + (aimP.x-rest.x)*a;
+    piv.y = rest.y + (aimP.y-rest.y)*a;
+    ang   = aimA * a;
+}
+
+// Begin a shot animation. The game state is already resolved; the visuals
+// (raise -> aim -> fire -> lower) play out and the gunshot lands at the fire
+// moment so it syncs with the muzzle flash.
+static void beginShot(const ActionResult& r, Actor shooter, Actor target){
+    shotActive  = true;
+    shotT       = 0.f;
+    shotFired   = false;
+    shotResult  = r;
+    shotShooter = shooter;
+    shotTarget  = target;
+}
+
+// advance the shot animation; trigger fire-moment fx + audio once
+static void updateShot(float dt, float spd){
+    if (!shotActive) return;
+    shotT += dt;
+    if (!shotFired && shotT >= 0.30f){
+        shotFired = true;
+        // gunshot vs. dry click
+        audioPlay(shotResult.wasLive ? SFX_LIVE : SFX_BLANK);
+        // muzzle world position at the aimed pose
+        V2 piv; float ang; shotPose(shotShooter, shotTarget, 1.f, piv, ang);
+        V2 m = gunMuzzle(piv, ang, 0.f);
+        applyShotFx(shotResult, shotTarget, m.x, m.y);
+    }
+    if (shotT >= 0.65f) shotActive = false;
 }
 
 // ---------------------------------------------------------------------------
 //  TOP SCREEN
 // ---------------------------------------------------------------------------
+// shells laid out on the table during the load animation (counts only;
+// the order is secret, so they're shown as anonymous brass shells)
+static void drawShellLoadout(float sy, float prog){
+    int total = game.announcedLive + game.announcedBlank;
+    if (total<=0) return;
+    float spacing = (total>8)? 22.f : 26.f;
+    float startx = TOP_W/2.0f - (total-1)*spacing/2.0f;
+    for (int i=0;i<total;i++){
+        // each shell pops in sequentially
+        float appear = prog*total - i;
+        if (appear<=0) continue;
+        float s = appear>1?1:appear;
+        float yoff = (1-s)*-18.f;                    // drop into place
+        bool live = i < game.announcedLive;          // tally colouring only
+        u32 col = live? C2D_Color32(0x9a,0x20,0x20,0xFF) : C2D_Color32(0x4a,0x4e,0x56,0xFF);
+        float x = startx + i*spacing;
+        float y = 138.f + sy + yoff;
+        // shell body
+        RS(x-5, y, 10, 16, col);
+        RS(x-5, y+16, 10, 7, C2D_Color32(0xc0,0x98,0x30,0xFF));   // brass
+        RS(x-5, y, 10, 2, C2D_Color32(0,0,0,80));
+    }
+}
+
 static void renderTopGame(){
     float sx=0, sy=0;
     if (fx.shake>0.3f){ sx=(frand()*2-1)*fx.shake; sy=(frand()*2-1)*fx.shake; }
 
-    // background gradient
-    C2D_DrawRectangle(0,0,0, TOP_W, SCR_H, Pal::bg0,Pal::bg0,Pal::bg1,Pal::bg1);
+    // ---- room background ----
+    C2D_DrawRectangle(0,0,0, TOP_W, SCR_H, Pal::bg1,Pal::bg1,Pal::bg0,Pal::bg0);
+    // back wall, lit faintly toward center
+    C2D_DrawRectangle(0,0,0, TOP_W, 150,
+        C2D_Color32(0x18,0x14,0x16,0xFF),C2D_Color32(0x18,0x14,0x16,0xFF),
+        C2D_Color32(0x0c,0x09,0x0c,0xFF),C2D_Color32(0x0c,0x09,0x0c,0xFF));
 
-    // ambient overhead lamp glow (layered circles)
-    for (int li=6; li>=0; li--){
-        float r = 60.f + li*22.f;
-        u8 a = (u8)(14 - li*1.5f);
-        C2D_DrawCircleSolid(TOP_W/2.f+sx, -20.f+sy, 0.06f, r, C2D_Color32(0xd0,0xb0,0x60,a));
+    // overhead hanging lamp + cone of light onto the table
+    for (int li=8; li>=0; li--){
+        float w = 70.f + li*30.f;
+        u8 a = (u8)(13 - li*1.2f);
+        C2D_DrawTriangle(TOP_W/2.f+sx, -10, C2D_Color32(0xe0,0xc0,0x70,a),
+                         TOP_W/2.f-w+sx, 175, C2D_Color32(0xe0,0xc0,0x70,0),
+                         TOP_W/2.f+w+sx, 175, C2D_Color32(0xe0,0xc0,0x70,0), 0.04f);
+    }
+    // lamp fixture
+    RS(TOP_W/2.f-1+sx, 0, 2, 8, C2D_Color32(0x30,0x28,0x20,0xFF));
+    C2D_DrawTriangle(TOP_W/2.f-10+sx,16, C2D_Color32(0x20,0x1a,0x14,0xFF),
+                     TOP_W/2.f+10+sx,16, C2D_Color32(0x20,0x1a,0x14,0xFF),
+                     TOP_W/2.f+sx,4,     C2D_Color32(0x40,0x36,0x28,0xFF), 0.05f);
+    C2D_DrawCircleSolid(TOP_W/2.f+sx, 16, 0.06f, 5, C2D_Color32(0xff,0xe6,0xa0,0xFF));
+
+    // ---- the Dealer across the table ----
+    drawDealer(TOP_W/2.0f + sx*0.4f, 84+sy*0.4f, fx.dealerHurt);
+
+    // ---- table (perspective: narrow at the dealer, wide at the player) ----
+    u32 tTop = C2D_Color32(0x2a,0x16,0x12,0xFF);
+    u32 tBot = C2D_Color32(0x16,0x0b,0x09,0xFF);
+    C2D_DrawTriangle(70,150+sy, tTop, TOP_W-70,150+sy, tTop, TOP_W+40,SCR_H+sy, tBot, 0.05f);
+    C2D_DrawTriangle(70,150+sy, tTop, TOP_W+40,SCR_H+sy, tBot, -40,SCR_H+sy, tBot, 0.05f);
+    // felt inlay
+    C2D_DrawTriangle(110,154+sy, C2D_Color32(0x16,0x2c,0x1a,0xFF),
+                     TOP_W-110,154+sy, C2D_Color32(0x16,0x2c,0x1a,0xFF),
+                     TOP_W-130,210+sy, C2D_Color32(0x0e,0x1c,0x10,0xFF), 0.06f);
+    C2D_DrawTriangle(110,154+sy, C2D_Color32(0x16,0x2c,0x1a,0xFF),
+                     TOP_W-130,210+sy, C2D_Color32(0x0e,0x1c,0x10,0xFF),
+                     130,210+sy, C2D_Color32(0x0e,0x1c,0x10,0xFF), 0.06f);
+    // near table edge highlight
+    RS(0,150+sy,TOP_W,2, C2D_Color32(0x50,0x2c,0x18,0xFF));
+
+    // ---- header text ----
+    drawText(8, 5, 0.46f, Pal::textDim, ALN_L, "ROUND %d/%d", game.round, game.maxRounds);
+    const char* turnTxt = game.over ? "" : (game.turn==ACTOR_PLAYER ? "YOUR TURN" : "DEALER");
+    drawText(TOP_W/2.0f, 4, 0.52f, game.turn==ACTOR_PLAYER?Pal::green:Pal::red, ALN_C, "%s", turnTxt);
+    if (g_settings.showFps) drawText(TOP_W-8, 5, 0.42f, Pal::textMute, ALN_R, "%.0f", fpsVal);
+
+    // dealer health pips (just under the head/torso)
+    drawHealthPips(TOP_W/2.0f - (game.dealer.maxLives-1)*7.f + sx*0.4f, 128+sy*0.4f,
+                   (int)(dispDealerLives+0.5f), game.dealer.maxLives, Pal::red, fx.dealerHurt);
+    if (game.dealer.cuffed) drawText(TOP_W/2.0f, 138, 0.36f, Pal::amber, ALN_C, "CUFFED");
+
+    // ---- gun: resting on the table, or raised mid-shot ----
+    bool loading = (loadBannerT>0);
+    if (loading){
+        // progress 0..1 over the banner life (banner starts at 1.6)
+        float prog = 1.0f - (loadBannerT/1.6f);
+        if (prog<0) prog=0;
+        if (prog>1) prog=1;
+        drawShellLoadout(sy, prog);
+    }
+    {
+        V2 piv; float ang;
+        if (shotActive){
+            // raise (0..0.22), hold, fire ~0.30, lower (0.45..0.65)
+            float a;
+            if (shotT < 0.22f)      a = shotT/0.22f;
+            else if (shotT < 0.45f) a = 1.f;
+            else                    a = 1.f - (shotT-0.45f)/0.20f;
+            if (a<0) a=0;
+            if (a>1) a=1;
+            shotPose(shotShooter, shotTarget, a, piv, ang);
+        } else {
+            piv = { TOP_W/2.0f, 176.f }; ang = 0.f;
+        }
+        piv.x += sx; piv.y += sy;
+        if (!loading) drawGunRotated(piv, ang, fx.recoil, fx.flash);
     }
 
-    // table surface
-    C2D_DrawRectangle(0,152+sy,0.05f, TOP_W, 90,
-        C2D_Color32(0x2e,0x18,0x14,0xFF), C2D_Color32(0x2e,0x18,0x14,0xFF),
-        C2D_Color32(0x14,0x0a,0x08,0xFF), C2D_Color32(0x14,0x0a,0x08,0xFF));
-    // table edge highlight
-    RS(0,152+sy,TOP_W,3, C2D_Color32(0x60,0x34,0x1c,0xFF));
-    RS(0,153+sy,TOP_W,1, C2D_Color32(0x80,0x50,0x28,0xFF));
-    // wood grain lines
-    for (int wi=0;wi<6;wi++){
-        float wy = 160.f + wi*12.f + sy;
-        RS(0, wy, TOP_W, 1, C2D_Color32(0x20,0x10,0x0c,0x60));
-    }
-    // green baize cloth center
-    RS(60,158+sy, 280, 30, C2D_Color32(0x16,0x2e,0x1a,0x60));
-
-    // header
-    drawText(8, 6, 0.5f, Pal::textDim, ALN_L, "ROUND %d / %d", game.round, game.maxRounds);
-    const char* turnTxt = game.over ? "" : (game.turn==ACTOR_PLAYER ? "YOUR TURN" : "DEALER'S TURN");
-    drawText(TOP_W/2.0f, 6, 0.62f, game.turn==ACTOR_PLAYER?Pal::green:Pal::red, ALN_C, "%s", turnTxt);
-    if (g_settings.showFps) drawText(TOP_W-8, 6, 0.45f, Pal::textMute, ALN_R, "%.0f fps", fpsVal);
-
-    // dealer
-    drawDealer(TOP_W/2.0f + sx, 78+sy, fx.dealerHurt);
-    drawText(TOP_W/2.0f+sx, 110+sy, 0.45f, Pal::textDim, ALN_C, "THE DEALER");
-    drawHealthPips(TOP_W/2.0f - (game.dealer.maxLives-1)*7.f + sx, 124+sy,
-                   game.dealer.lives, game.dealer.maxLives, Pal::red, fx.dealerHurt);
-
-    // shotgun on the table
-    drawShotgun(TOP_W/2.0f + sx, 168+sy, fx.recoil, fx.flash);
+    // ---- particles (sparks) ----
     for (auto& p : fx.parts){
         float a = p.life/p.max;
         u8 al = (u8)(255*a);
@@ -344,54 +470,52 @@ static void renderTopGame(){
         C2D_DrawCircleSolid(p.x+sx, p.y+sy, 0.9f, 1.6f*a+0.6f, c);
     }
 
-    // saw / cuff indicators
-    float iy=196+sy;
-    if (game.sawActive)      { drawText(10, iy, 0.42f, Pal::amber, ALN_L, "SAWED x2"); }
-    if (game.dealer.cuffed)  { drawText(TOP_W/2.0f, 128+sy, 0.4f, Pal::amber, ALN_C, "[CUFFED]"); }
-    if (game.player.cuffed)  { drawText(TOP_W/2.0f, 224+sy, 0.4f, Pal::amber, ALN_C, "[CUFFED]"); }
+    // ---- bottom HUD strip ----
+    RS(0, 214, TOP_W, 26, C2D_Color32(0x08,0x06,0x08,0xCC));
+    RS(0, 214, TOP_W, 1,  Pal::line);
+    // player label + health
+    drawText(8, 220, 0.42f, Pal::textDim, ALN_L, "YOU");
+    drawHealthPips(40+sx, 226, (int)(dispPlayerLives+0.5f), game.player.maxLives, Pal::green, fx.playerHurt);
+    if (game.player.cuffed) drawText(120, 220, 0.36f, Pal::amber, ALN_L, "CUFFED");
+    if (game.sawActive)     drawText(168, 220, 0.36f, Pal::amber, ALN_L, "SAW x2");
 
-    // player health
-    drawText(8, 224+sy, 0.45f, Pal::textDim, ALN_L, "YOU");
-    drawHealthPips(40+sx, 228+sy, game.player.lives, game.player.maxLives, Pal::green, fx.playerHurt);
-
-    // chamber / shell info panel (right)
-    float px=TOP_W-118, py=150+sy;
-    drawPanel(px, py-2, 116, 56, C2D_Color32(0x18,0x12,0x14,0xCC), Pal::line);
-    drawText(px+8, py+2, 0.42f, Pal::textDim, ALN_L, "CHAMBER");
-    drawText(px+8, py+16, 0.46f, Pal::red,   ALN_L, "LIVE  %d", game.announcedLive);
-    drawText(px+8, py+30, 0.46f, Pal::steel, ALN_L, "BLANK %d", game.announcedBlank);
+    // chamber info (right of HUD)
     int knowCur = playerKnow(game, (int)game.pos);
+    drawText(TOP_W-150, 220, 0.40f, Pal::red,   ALN_L, "LIVE %d", liveLeft(game));
+    drawText(TOP_W-92,  220, 0.40f, Pal::steel, ALN_L, "BLANK %d", blankLeft(game));
     if (knowCur>=0)
-        drawText(px+108, py+16, 0.44f, knowCur==1?Pal::red:Pal::steel, ALN_R, "NEXT:%s", knowCur==1?"LIVE":"BLANK");
+        drawText(TOP_W-8, 220, 0.40f, knowCur==1?Pal::red:Pal::steel, ALN_R,
+                 "NEXT:%s", knowCur==1?"LIVE":"BLANK");
 
-    // remaining shells as a row of icons
+    // remaining shells row, top-right
     int left = shellsLeft(game);
-    int show = left>8?8:left;
-    float bx=8, by=158+sy;
+    int show = left>10?10:left;
     for (int i=0;i<show;i++){
         int kn = playerKnow(game, (int)game.pos+i);
-        drawShellIcon(bx+i*16, by, 11, 26, (i==0 && knowCur>=0)?knowCur:(kn>=0?kn:-1));
+        drawShellIcon(TOP_W-8-(show-i)*15, 26, 11, 24, (i==0)?(knowCur>=0?knowCur:-1):(kn>=0?kn:-1));
     }
-    if (left>8) drawText(8+8*16+2, by+8, 0.4f, Pal::textDim, ALN_L, "+%d", left-8);
 
-    // banners
+    // ---- banners ----
     if (loadBannerT>0){
         float a = loadBannerT>1?1:loadBannerT;
-        RS(0,70, TOP_W,40, C2D_Color32(0,0,0,(u8)(150*a)));
-        drawText(TOP_W/2.f, 80, 0.7f, Pal::text, ALN_C, "%d LIVE   %d BLANK", game.announcedLive, game.announcedBlank);
+        RS(0,58, TOP_W,34, C2D_Color32(0,0,0,(u8)(160*a)));
+        drawText(TOP_W/2.f, 64, 0.6f, Pal::text, ALN_C, "%d LIVE   %d BLANK",
+                 game.announcedLive, game.announcedBlank);
     }
     if (roundBannerT>0){
         float a = roundBannerT>1?1:roundBannerT;
-        RS(0,96, TOP_W,48, C2D_Color32(0,0,0,(u8)(180*a)));
-        drawText(TOP_W/2.f, 104, 0.95f, Pal::red, ALN_C, "ROUND %d", game.round);
-        drawText(TOP_W/2.f, 126, 0.45f, Pal::textDim, ALN_C, "%d lives each", game.player.maxLives);
+        RS(0,92, TOP_W,52, C2D_Color32(0,0,0,(u8)(190*a)));
+        drawText(TOP_W/2.f, 100, 0.95f, Pal::red, ALN_C, "ROUND %d", game.round);
+        drawText(TOP_W/2.f, 124, 0.42f, Pal::textDim, ALN_C, "%d lives each", game.player.maxLives);
     }
-    if (bannerT>0 && game.turn==ACTOR_DEALER){
-        drawText(TOP_W/2.f, 142+sy, 0.46f, Pal::textDim, ALN_C, "The Dealer %s...", banner);
+    if (bannerT>0 && game.turn==ACTOR_DEALER && !shotActive){
+        RS(60,150, TOP_W-120, 16, C2D_Color32(0,0,0,140));
+        drawText(TOP_W/2.f, 151, 0.42f, Pal::textDim, ALN_C, "The Dealer %s...", banner);
     }
 
+    // ---- post fx ----
     if (g_settings.vignette)  drawVignette(TOP_W, SCR_H, 1.0f);
-    if (fx.flash>0.02f)       drawDim(TOP_W, SCR_H, -0.0f), RS(0,0,TOP_W,SCR_H, C2D_Color32(0xff,0xe8,0xc0,(u8)(70*fx.flash)));
+    if (fx.flash>0.02f)       RS(0,0,TOP_W,SCR_H, C2D_Color32(0xff,0xe8,0xc0,(u8)(80*fx.flash)));
     if (g_settings.scanlines) drawScanlines(TOP_W, SCR_H, 0.10f);
     drawDim(TOP_W, SCR_H, (100-g_settings.brightness)/100.f*0.6f);
 }
@@ -731,24 +855,32 @@ static void renderInfoBottom(const char* title, const char* sub){
 static void startNewGame(){
     gameNew(game);
     uiSel=8; prevTurn=ACTOR_PLAYER; prevRound=game.round;
-    dealerTimer=0; roundBannerT=1.6f; loadBannerT=1.3f; overDelay=0;
+    dealerTimer=0; roundBannerT=1.6f; loadBannerT=1.6f; overDelay=0;
+    shotActive=false; shotT=0; shotFired=false;
+    dispPlayerLives = (float)game.player.lives;
+    dispDealerLives = (float)game.dealer.lives;
+    prevShellsLeft  = shellsLeft(game);
     audioSetMusic(true);
 }
 
-// detect transitions for banners
+// detect transitions for banners and chamber reloads
 static void postUpdateDetect(){
     if (game.round != prevRound){ roundBannerT=1.6f; prevRound=game.round; }
     if (game.turn==ACTOR_DEALER && prevTurn==ACTOR_PLAYER){ dealerTimer = 0.7f; }
     prevTurn=game.turn;
+    // a fresh chamber load makes the count of remaining shells jump up
+    int sl = shellsLeft(game);
+    if (sl > prevShellsLeft){ loadBannerT = 1.6f; }
+    prevShellsLeft = sl;
 }
 
 // ---------------------------------------------------------------------------
 //  INPUT
 // ---------------------------------------------------------------------------
 static void useSelected(){
-    if (game.over || game.turn!=ACTOR_PLAYER) return;
-    if (uiSel==8){ ActionResult r=playerShoot(game, ACTOR_DEALER); audioPlay(SFX_SELECT); applyShotFx(r, ACTOR_DEALER); return; }
-    if (uiSel==9){ ActionResult r=playerShoot(game, ACTOR_PLAYER); audioPlay(SFX_SELECT); applyShotFx(r, ACTOR_PLAYER); return; }
+    if (game.over || game.turn!=ACTOR_PLAYER || shotActive) return;
+    if (uiSel==8){ ActionResult r=playerShoot(game, ACTOR_DEALER); beginShot(r, ACTOR_PLAYER, ACTOR_DEALER); return; }
+    if (uiSel==9){ ActionResult r=playerShoot(game, ACTOR_PLAYER); beginShot(r, ACTOR_PLAYER, ACTOR_PLAYER); return; }
     if (uiSel < (int)game.player.items.size()){
         Item it=game.player.items[uiSel];
         if (it==IT_ADREN){
@@ -777,10 +909,10 @@ static void handleGameInput(u32 kDown){
         if (kDown&KEY_B){ adrenMode=false; audioPlay(SFX_BACK);}
         return;
     }
-    if (game.turn!=ACTOR_PLAYER || game.over) return;
+    if (game.turn!=ACTOR_PLAYER || game.over || shotActive) return;
 
-    if (kDown&KEY_X){ ActionResult r=playerShoot(game,ACTOR_DEALER); audioPlay(SFX_SELECT); applyShotFx(r,ACTOR_DEALER); return; }
-    if (kDown&KEY_Y){ ActionResult r=playerShoot(game,ACTOR_PLAYER); audioPlay(SFX_SELECT); applyShotFx(r,ACTOR_PLAYER); return; }
+    if (kDown&KEY_X){ ActionResult r=playerShoot(game,ACTOR_DEALER); beginShot(r, ACTOR_PLAYER, ACTOR_DEALER); return; }
+    if (kDown&KEY_Y){ ActionResult r=playerShoot(game,ACTOR_PLAYER); beginShot(r, ACTOR_PLAYER, ACTOR_PLAYER); return; }
 
     // navigation grid: items 0..7 (2x4), 8 dealer, 9 self
     if (kDown&KEY_RIGHT){
@@ -806,7 +938,7 @@ static void handleGameInput(u32 kDown){
 
 static void handleGameTouch(touchPosition tp, u32 kDown){
     if (!(kDown&KEY_TOUCH)) return;
-    if (game.over || game.turn!=ACTOR_PLAYER || adrenMode) return;
+    if (game.over || game.turn!=ACTOR_PLAYER || adrenMode || shotActive) return;
     float tx=tp.px, ty=tp.py;
     for (int i=0;i<8;i++){
         float x,y; itemSlotRect(i,x,y);
@@ -915,23 +1047,32 @@ int main(int argc, char** argv){
             if (roundBannerT>0) roundBannerT-=dt;
             if (loadBannerT>0) loadBannerT-=dt;
 
-            if (!game.over && game.turn==ACTOR_DEALER){
+            updateShot(dt, spd);
+
+            // the dealer only acts when no shot animation is playing
+            if (!game.over && game.turn==ACTOR_DEALER && !shotActive){
                 dealerTimer -= dt;
                 if (dealerTimer<=0){
                     DealerStep s = dealerStep(game);
                     if (s.kind!=DA_NONE){
                         setBanner(s.think.c_str());
-                        if (s.kind==DA_SHOOT_PLAYER) applyShotFx(s.result, ACTOR_PLAYER);
-                        else if (s.kind==DA_SHOOT_SELF) applyShotFx(s.result, ACTOR_DEALER);
+                        if (s.kind==DA_SHOOT_PLAYER) beginShot(s.result, ACTOR_DEALER, ACTOR_PLAYER);
+                        else if (s.kind==DA_SHOOT_SELF) beginShot(s.result, ACTOR_DEALER, ACTOR_DEALER);
+                        // DA_ITEM: applyItemEffect already played the item's sound
                     }
                     dealerTimer = 0.95f/spd;
                 }
             }
             postUpdateDetect();
 
-            if (game.over){
+            // smooth the displayed health toward the real values
+            dispPlayerLives += ((float)game.player.lives - dispPlayerLives) * (1.f - expf(-dt*12.f));
+            dispDealerLives += ((float)game.dealer.lives - dispDealerLives) * (1.f - expf(-dt*12.f));
+
+            // wait for any in-flight shot to finish before ending the game
+            if (game.over && !shotActive){
                 overDelay += dt;
-                if (overDelay>1.4f){ state=ST_GAMEOVER; }
+                if (overDelay>1.2f){ state=ST_GAMEOVER; }
             }
         }
 
