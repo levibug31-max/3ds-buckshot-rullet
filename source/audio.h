@@ -21,6 +21,9 @@ enum Sfx {
     SFX_PHONE,      // burner phone
     SFX_WIN,        // round / game won
     SFX_LOSE,       // game over
+    SFX_RING,       // tinnitus ring after taking a live round
+    SFX_HEART,      // heartbeat thump
+    SFX_SCREECH,    // the Dealer's scowl/jumpscare screech
     SFX_COUNT
 };
 

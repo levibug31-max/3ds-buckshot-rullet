@@ -91,11 +91,13 @@ void finishClip(Clip& c) {
 }
 
 void makeSfx() {
-    // GUNSHOT (live): sharp noise crack + low body thump
+    // GUNSHOT (live): deep shotgun boom — sharp crack + heavy low body + tail
     {
-        Clip& c = g_clips[SFX_LIVE]; buildClip(c, 0.5f);
-        synthNoise(c.data, c.frames, 0.45f, 1.0f, 14.f, 0.55f);
-        synthTone (c.data, c.frames, 0.30f, 130.f, 45.f, 0.6f, 11.f, 0);
+        Clip& c = g_clips[SFX_LIVE]; buildClip(c, 0.6f);
+        synthNoise(c.data, c.frames, 0.05f, 1.0f, 60.f, 0.85f);  // initial crack
+        synthNoise(c.data, c.frames, 0.55f, 0.8f, 9.f,  0.30f);  // booming tail (low LP)
+        synthTone (c.data, c.frames, 0.34f, 95.f, 32.f, 0.85f, 8.f, 0); // bass thump
+        synthTone (c.data, c.frames, 0.20f, 180.f, 60.f, 0.4f, 14.f, 2);// mid body
         finishClip(c);
     }
     // BLANK / dry click
@@ -218,6 +220,46 @@ void makeSfx() {
         Clip& c = g_clips[SFX_LOSE]; buildClip(c, 0.9f);
         synthTone (c.data, c.frames, 0.85f, 200.f, 50.f, 0.4f, 2.5f, 2);
         synthNoise(c.data, c.frames, 0.4f, 0.25f, 6.f, 0.4f);
+        finishClip(c);
+    }
+    // RING: tinnitus — a high sine that swells in then slowly fades
+    {
+        Clip& c = g_clips[SFX_RING]; buildClip(c, 1.8f);
+        for (u32 i=0;i<c.frames;i++){
+            float t=(float)i/SAMPLE_RATE;
+            float env = (t<0.05f? t/0.05f : expf(-(t-0.05f)*1.6f));   // quick swell, slow decay
+            float s = sinf(2*M_PI*4300.f*t)*0.5f + sinf(2*M_PI*6500.f*t)*0.18f;
+            c.data[i]=(s16)(clampf(s*env*0.5f,-1,1)*32000);
+        }
+        finishClip(c);
+    }
+    // HEART: two low thumps (lub-dub)
+    {
+        Clip& c = g_clips[SFX_HEART]; buildClip(c, 0.7f);
+        for (int beat=0; beat<2; beat++){
+            float off = beat*0.26f;
+            u32 base = (u32)(off*SAMPLE_RATE);
+            float amp = beat==0?0.9f:0.7f;
+            for (u32 i=0;i<durFrames(0.18f) && base+i<c.frames;i++){
+                float t=(float)i/SAMPLE_RATE;
+                float env=expf(-t*22.f);
+                float s=sinf(2*M_PI*55.f*t)*env*amp;
+                c.data[base+i]=(s16)(clampf(c.data[base+i]/32000.f+s,-1,1)*32000);
+            }
+        }
+        finishClip(c);
+    }
+    // SCREECH: the Dealer's pained scowl — dissonant rising shriek + noise
+    {
+        Clip& c = g_clips[SFX_SCREECH]; buildClip(c, 0.45f);
+        for (u32 i=0;i<c.frames;i++){
+            float t=(float)i/SAMPLE_RATE; if(t>0.4f)break;
+            float env=(t<0.02f?t/0.02f:expf(-(t-0.02f)*7.f));
+            float f1=620.f+900.f*t, f2=930.f+1500.f*t;          // two detuned sweeps
+            float s=(sinf(2*M_PI*f1*t)+0.7f*sinf(2*M_PI*f2*t))*0.4f;
+            s += (frand()*2-1)*0.25f*env;                        // grit
+            c.data[i]=(s16)(clampf(s*env,-1,1)*32000);
+        }
         finishClip(c);
     }
 }

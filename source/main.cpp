@@ -98,8 +98,15 @@ static void applyShotFx(const ActionResult& r, Actor target, float mx, float my)
     if (r.fired && r.wasLive){
         if (g_settings.muzzleFlash) fx.flash = 1.0f;
         if (g_settings.screenShake) fx.shake = 9.0f;
-        if (target==ACTOR_DEALER){ fx.dealerHurt = 1.0f; }
-        else { fx.playerHurt = 1.0f; fx.blackout = 1.0f; }  // taking a live round cuts to black
+        if (target==ACTOR_DEALER){
+            fx.dealerHurt = 1.0f;
+            audioPlay(SFX_SCREECH);                 // the Dealer's pained scowl
+        } else {
+            fx.playerHurt = 1.0f;
+            fx.blackout = 1.5f;                      // hold full black, then slow fade in
+            audioPlay(SFX_RING);                    // tinnitus
+            audioPlay(SFX_HEART);                   // heartbeat thump
+        }
         spawnSparks(mx, my, 22, Pal::amber);
         spawnSparks(mx, my, 10, Pal::red);
     } else if (r.fired){
@@ -116,7 +123,7 @@ static void updateFx(float dt){
     fx.recoil    *= expf(-dt*9.f);
     fx.dealerHurt*= expf(-dt*4.f);
     fx.playerHurt*= expf(-dt*4.f);
-    fx.blackout  *= expf(-dt*2.0f);   // holds dark, then fades back in
+    fx.blackout  *= expf(-dt*1.4f);   // holds full black (clamped), then slow fade in
     fx.eyeGlow = 0.5f + 0.5f*sinf((float)svcGetSystemTick()/TICKS_PER_SEC*2.0f);
     for (size_t i=0;i<fx.parts.size();){
         Particle& p = fx.parts[i];
