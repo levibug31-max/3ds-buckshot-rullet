@@ -1022,51 +1022,16 @@ static void handleGameTouch(touchPosition tp, u32 kDown){
 // ---------------------------------------------------------------------------
 int main(int argc, char** argv){
     gfxInitDefault();
-
-    // ---- DIAGNOSTIC: paint screens solid colors via raw framebuffer ----
-    // Step colors: top=RED bottom=BLUE means "after gfxInit, before C3D"
-    // top=GREEN bottom=BLUE means "after C3D, before C2D", etc.
-    // No citro2d, no console — just memset so it cannot fail.
-#define PAINT(top_r,top_g,top_b, bot_r,bot_g,bot_b) do { \
-    u16 _tw,_th,_bw,_bh; \
-    u8* _tf = gfxGetFramebuffer(GFX_TOP,   GFX_LEFT, &_tw, &_th); \
-    u8* _bf = gfxGetFramebuffer(GFX_BOTTOM,GFX_LEFT, &_bw, &_bh); \
-    for(u32 _i=0;_i<(u32)(_tw*_th);_i++){_tf[_i*3]=(top_b);_tf[_i*3+1]=(top_g);_tf[_i*3+2]=(top_r);} \
-    for(u32 _i=0;_i<(u32)(_bw*_bh);_i++){_bf[_i*3]=(bot_b);_bf[_i*3+1]=(bot_g);_bf[_i*3+2]=(bot_r);} \
-    gfxFlushBuffers(); gfxSwapBuffers(); gfxFlushBuffers(); gfxSwapBuffers(); \
-} while(0)
-
-    // Step 1: gfxInitDefault done → top RED, bottom BLUE
-    PAINT(255,0,0, 0,0,255);
-
     C3D_Init(C3D_DEFAULT_CMDBUF_SIZE);
-    // Step 2: C3D_Init done → top GREEN, bottom BLUE
-    PAINT(0,255,0, 0,0,255);
-
     C2D_Init(C2D_DEFAULT_MAX_OBJECTS);
-    // Step 3: C2D_Init done → top YELLOW, bottom BLUE
-    PAINT(255,255,0, 0,0,255);
-
     C2D_Prepare();
-    // Step 4: C2D_Prepare done → top WHITE, bottom BLUE
-    PAINT(255,255,255, 0,0,255);
-
     g_top = C2D_CreateScreenTarget(GFX_TOP, GFX_LEFT);
     g_bot = C2D_CreateScreenTarget(GFX_BOTTOM, GFX_LEFT);
-    // Step 5: targets done → top WHITE, bottom GREEN
-    PAINT(255,255,255, 0,255,0);
-
     gfxTextInit();
     settingsLoad();
     g_set = buildSettings();
     srand((unsigned)(svcGetSystemTick()&0xFFFFFFFF));
-    // Step 6: settings done → top WHITE, bottom YELLOW
-    PAINT(255,255,255, 255,255,0);
-
     audioInitAsync();
-    // Step 7: audioInitAsync done → top WHITE, bottom WHITE (all done, entering loop)
-    PAINT(255,255,255, 255,255,255);
-#undef PAINT
 
     u64 last = svcGetSystemTick();
 
@@ -1179,7 +1144,7 @@ int main(int argc, char** argv){
         audioUpdate();
 
         // ---- render ----
-        C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
+        C3D_FrameBegin(0);
         gfxTextFrame();
 
         C2D_TargetClear(g_top, Pal::bg1);
