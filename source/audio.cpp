@@ -14,12 +14,12 @@ namespace {
 struct Clip {
     s16*  data = nullptr;
     u32   frames = 0;
-    ndspWaveBuf wb[1];            // one wavebuf per clip is fine for short sfx
 };
 
-Clip       g_clips[SFX_COUNT];
-int        g_nextChan = 0;
-bool       g_ready = false;
+Clip        g_clips[SFX_COUNT];
+ndspWaveBuf g_chanWb[SFX_CHANNELS]; // one wavebuf per channel (not per clip)
+int         g_nextChan = 0;
+bool        g_ready = false;
 
 // ambient drone
 s16*        g_music = nullptr;
@@ -83,16 +83,11 @@ u32 durFrames(float sec) { return (u32)(sec * SAMPLE_RATE) + 1; }
 void buildClip(Clip& c, float seconds) {
     c.frames = durFrames(seconds);
     c.data   = alloc16(c.frames);
-    memset(c.wb, 0, sizeof(c.wb));
 }
 
 void finishClip(Clip& c) {
     if (!c.data) return;
     DSP_FlushDataCache(c.data, c.frames * sizeof(s16));
-    c.wb[0].data_vaddr = c.data;
-    c.wb[0].nsamples   = c.frames;
-    c.wb[0].looping    = false;
-    c.wb[0].status     = NDSP_WBUF_DONE;
 }
 
 void makeSfx() {
@@ -272,6 +267,7 @@ void audioInit() {
     ndspSetOutputMode(NDSP_OUTPUT_STEREO);
     srand(svcGetSystemTick() & 0xFFFFFFFF);
 
+    memset(g_chanWb, 0, sizeof(g_chanWb));
     for (int i = 0; i < SFX_CHANNELS; ++i)
         configChannel(i, SAMPLE_RATE);
     configChannel(MUSIC_CHANNEL, SAMPLE_RATE);
@@ -309,8 +305,13 @@ void audioPlay(Sfx s) {
     int ch = g_nextChan;
     g_nextChan = (g_nextChan + 1) % SFX_CHANNELS;
     ndspChnWaveBufClear(ch);
-    c.wb[0].status = NDSP_WBUF_DONE;
-    ndspChnWaveBufAdd(ch, &c.wb[0]);
+    ndspWaveBuf& wb = g_chanWb[ch];
+    memset(&wb, 0, sizeof(wb));
+    wb.data_vaddr = c.data;
+    wb.nsamples   = c.frames;
+    wb.looping    = false;
+    wb.status     = NDSP_WBUF_DONE;
+    ndspChnWaveBufAdd(ch, &wb);
 }
 
 void audioSetMusic(bool on) {

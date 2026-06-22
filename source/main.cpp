@@ -137,58 +137,157 @@ static void drawHealthPips(float x, float y, int lives, int maxLives, u32 col, f
 }
 
 static void drawDealer(float cx, float cy, float hurt){
-    // chair shadow
-    C2D_DrawEllipse(cx-46, cy+44, 0.1f, 92, 18, C2D_Color32(0,0,0,90),C2D_Color32(0,0,0,90),C2D_Color32(0,0,0,0),C2D_Color32(0,0,0,0));
-    // torso
-    u32 coat = C2D_Color32(0x1a,0x15,0x18,0xFF);
-    drawPanel(cx-38, cy-6, 76, 58, coat, Pal::line);
-    // shoulders
-    C2D_DrawTriangle(cx-38, cy+8, coat, cx-58, cy+44, coat, cx-30, cy+44, coat, 0.2f);
-    C2D_DrawTriangle(cx+38, cy+8, coat, cx+58, cy+44, coat, cx+30, cy+44, coat, 0.2f);
+    u32 coat  = C2D_Color32(0x16,0x12,0x16,0xFF);
+    u32 coatE = C2D_Color32(0x0e,0x0c,0x10,0xFF);
+    u32 skin  = C2D_Color32(0x16,0x14,0x16,0xFF);
+
+    // chair back
+    RS(cx-46, cy-64, 92, 12, C2D_Color32(0x20,0x18,0x1c,0xFF));
+    RS(cx-42, cy-56, 84, 6,  C2D_Color32(0x2e,0x24,0x28,0xFF));
+    RS(cx-44, cy-52, 88, 100, C2D_Color32(0x18,0x14,0x18,0xFF)); // chair body (behind torso)
+
+    // floor shadow
+    C2D_DrawEllipse(cx-46, cy+44, 0.1f, 92, 18,
+        C2D_Color32(0,0,0,100), C2D_Color32(0,0,0,100),
+        C2D_Color32(0,0,0,0),   C2D_Color32(0,0,0,0));
+
+    // arms (behind torso)
+    RS(cx-62, cy+6,  26, 38, coat);
+    RS(cx+36, cy+6,  26, 38, coat);
+    // coat sleeve edge
+    RS(cx-62, cy+6,  2, 38, coatE);
+    RS(cx+60, cy+6,  2, 38, coatE);
+
+    // hands on table
+    C2D_DrawCircleSolid(cx-50, cy+42, 0.28f, 10, skin);
+    C2D_DrawCircleSolid(cx+50, cy+42, 0.28f, 10, skin);
+    C2D_DrawCircleSolid(cx-54, cy+44, 0.29f, 6, skin);
+    C2D_DrawCircleSolid(cx+54, cy+44, 0.29f, 6, skin);
+
+    // torso / coat body
+    drawPanel(cx-36, cy-8, 72, 56, coat, Pal::line);
+
+    // white shirt front strip
+    u32 shirt = C2D_Color32(0xd0,0xcc,0xc8,0xFF);
+    RS(cx-6, cy-8, 12, 38, shirt);
+    RS(cx-6, cy-8, 12,  2, C2D_Color32(0xb0,0xac,0xa8,0xFF)); // collar edge
+
+    // coat lapels (overlaid triangles that part on the chest)
+    C2D_DrawTriangle(cx-36, cy-8,  coat, cx-6, cy-8, coat, cx-20, cy+32, coatE, 0.22f);
+    C2D_DrawTriangle(cx+36, cy-8,  coat, cx+6, cy-8, coat, cx+20, cy+32, coatE, 0.22f);
+
+    // red tie
+    u32 tie = C2D_Color32(0x8c,0x14,0x14,0xFF);
+    C2D_DrawTriangle(cx-4, cy-6, tie, cx+4, cy-6, tie, cx+1, cy+26, tie, 0.32f);
+    // tie knot
+    RS(cx-3, cy-8, 6, 4, C2D_Color32(0xa0,0x1a,0x1a,0xFF));
+
+    // coat buttons
+    for (int bi=0; bi<3; bi++)
+        C2D_DrawCircleSolid(cx, cy+4+bi*13, 0.36f, 2.2f, C2D_Color32(0x38,0x2e,0x32,0xFF));
+
+    // shoulders humps
+    C2D_DrawTriangle(cx-36, cy+6, coat, cx-60, cy+40, coat, cx-28, cy+46, coat, 0.21f);
+    C2D_DrawTriangle(cx+36, cy+6, coat, cx+60, cy+40, coat, cx+28, cy+46, coat, 0.21f);
+
     // neck
-    RS(cx-7, cy-14, 14, 12, C2D_Color32(0x12,0x10,0x12,0xFF));
+    RS(cx-6, cy-16, 12, 12, skin);
+
     // head
-    C2D_DrawCircleSolid(cx, cy-26, 0.3f, 20, C2D_Color32(0x14,0x12,0x14,0xFF));
-    // hat brim + top
-    RS(cx-26, cy-40, 52, 5, Pal::black);
-    RS(cx-16, cy-58, 32, 20, C2D_Color32(0x0c,0x0a,0x0c,0xFF));
-    // glowing eyes
-    float g = 0.45f + 0.55f*fx.eyeGlow;
-    u32 eye = C2D_Color32((u8)(0xc0+0x30*g),(u8)(0x20*g),(u8)(0x20*g),0xFF);
-    C2D_DrawCircleSolid(cx-8, cy-26, 0.4f, 3.2f, eye);
-    C2D_DrawCircleSolid(cx+8, cy-26, 0.4f, 3.2f, eye);
-    // hurt flash overlay
+    C2D_DrawCircleSolid(cx, cy-28, 0.3f, 18, skin);
+    // chin / jaw
+    RS(cx-10, cy-18, 20, 10, skin);
+
+    // hat brim
+    RS(cx-28, cy-42, 56, 5, C2D_Color32(0x08,0x06,0x08,0xFF));
+    // hat crown
+    RS(cx-17, cy-62, 34, 22, C2D_Color32(0x0c,0x0a,0x0c,0xFF));
+    // hat band
+    RS(cx-17, cy-44, 34, 4, C2D_Color32(0x28,0x1c,0x20,0xFF));
+    // hat top
+    RS(cx-15, cy-64, 30, 3, C2D_Color32(0x08,0x06,0x08,0xFF));
+
+    // glowing red eyes
+    float ge = 0.42f + 0.58f*fx.eyeGlow;
+    u32 eyeHalo = C2D_Color32(0xff, (u8)(0x50*ge), (u8)(0x10*ge), (u8)(50*ge));
+    u32 eyeCore = C2D_Color32((u8)(0xc0+0x3f*ge), (u8)(0x18*ge), (u8)(0x18*ge), 0xFF);
+    C2D_DrawCircleSolid(cx-8, cy-28, 0.37f, 5.5f, eyeHalo);
+    C2D_DrawCircleSolid(cx+8, cy-28, 0.37f, 5.5f, eyeHalo);
+    C2D_DrawCircleSolid(cx-8, cy-28, 0.42f, 3.0f, eyeCore);
+    C2D_DrawCircleSolid(cx+8, cy-28, 0.42f, 3.0f, eyeCore);
+    // eye glint
+    C2D_DrawCircleSolid(cx-7, cy-30, 0.5f, 1.0f, C2D_Color32(0xff,0xd0,0xd0,0xA0));
+    C2D_DrawCircleSolid(cx+9, cy-30, 0.5f, 1.0f, C2D_Color32(0xff,0xd0,0xd0,0xA0));
+
+    // hurt flash
     if (hurt>0.01f)
-        RS(cx-58, cy-60, 116, 116, C2D_Color32(0xc8,0x20,0x20,(u8)(120*hurt)));
+        RS(cx-64, cy-66, 128, 128, C2D_Color32(0xcc,0x1e,0x1e,(u8)(130*hurt)));
 }
 
 static void drawShotgun(float cx, float cy, float recoil, float flash){
-    float ox = -recoil*10.f;
+    float ox = -recoil*12.f;
     cx += ox;
-    u32 steel = C2D_Color32(0x6a,0x6c,0x72,0xFF);
-    u32 steelD= C2D_Color32(0x3c,0x3e,0x44,0xFF);
-    u32 wood  = C2D_Color32(0x55,0x36,0x20,0xFF);
-    // stock
-    C2D_DrawTriangle(cx-92,cy-6,wood, cx-92,cy+14,wood, cx-58,cy+10,wood, 0.2f);
-    RS(cx-66, cy-8, 30, 18, wood);
-    // receiver
-    RS(cx-40, cy-9, 34, 20, steelD);
-    // barrel
-    RS(cx-8, cy-7, 96, 12, steel);
-    RS(cx-8, cy-7, 96, 3, C2D_Color32(0x9a,0x9c,0xa2,0xFF));
-    RS(cx-8, cy+2, 96, 3, steelD);
-    // pump
-    RS(cx+6, cy+5, 28, 8, C2D_Color32(0x2a,0x1c,0x12,0xFF));
-    // muzzle
-    RS(cx+86, cy-9, 6, 16, steelD);
+    u32 steel  = C2D_Color32(0x72,0x74,0x7c,0xFF);
+    u32 steelD = C2D_Color32(0x3e,0x40,0x46,0xFF);
+    u32 steelH = C2D_Color32(0xa8,0xaa,0xb2,0xFF);
+    u32 wood   = C2D_Color32(0x58,0x38,0x1e,0xFF);
+    u32 woodD  = C2D_Color32(0x38,0x22,0x10,0xFF);
+
+    // stock (butt)
+    C2D_DrawTriangle(cx-92,cy-5,wood, cx-92,cy+16,wood, cx-62,cy+12,woodD, 0.18f);
+    RS(cx-68, cy-8, 32, 20, wood);
+    // wood grain lines on stock
+    RS(cx-66, cy-6, 28, 1, woodD);
+    RS(cx-66, cy-2, 28, 1, woodD);
+    RS(cx-66, cy+2, 26, 1, woodD);
+
+    // trigger guard
+    RS(cx-52, cy+10, 2, 10, steelD);
+    C2D_DrawCircleSolid(cx-44, cy+18, 0.22f, 9, steelD);
+    C2D_DrawCircleSolid(cx-44, cy+18, 0.25f, 7, Pal::bg0);
+    RS(cx-36, cy+10, 2, 10, steelD);
+
+    // receiver box
+    RS(cx-40, cy-10, 36, 22, steelD);
+    RS(cx-40, cy-10, 36,  3, steelH); // top glint
+    RS(cx-40, cy+10, 36,  2, C2D_Color32(0x20,0x22,0x28,0xFF)); // bottom shadow
+    // ejection port
+    RS(cx-30, cy-4, 16, 8, C2D_Color32(0x18,0x18,0x20,0xFF));
+
+    // barrel (top barrel + bottom)
+    RS(cx-8, cy-8, 98, 14, steel);
+    RS(cx-8, cy-8, 98,  3, steelH); // top highlight
+    RS(cx-8, cy+3,  98,  3, steelD); // bottom shadow
+    // barrel rib (top center line)
+    RS(cx-8, cy-5,  98, 1, steelH);
+
+    // pump (foregrip)
+    RS(cx+4, cy+4, 30, 10, wood);
+    RS(cx+4, cy+4, 30,  1, woodD);
+    // pump texture
+    for (int i=0;i<6;i++) RS(cx+6+i*4, cy+12, 1, 2, woodD);
+
+    // muzzle end cap
+    RS(cx+88, cy-10, 8, 18, steelD);
+    RS(cx+88, cy-10, 8,  3, steelH);
+    // barrel hole
+    C2D_DrawCircleSolid(cx+94, cy-1, 0.92f, 5, C2D_Color32(0x08,0x08,0x10,0xFF));
+
+    // front sight bead
+    C2D_DrawCircleSolid(cx+82, cy-10, 0.88f, 2, steelH);
+
     // muzzle flash
     if (flash>0.02f){
         float s = flash;
-        u32 f1 = C2D_Color32(0xff,0xe0,0x80,(u8)(220*s));
-        u32 f2 = C2D_Color32(0xff,0x90,0x30,(u8)(160*s));
-        C2D_DrawCircleSolid(cx+96, cy-1, 0.9f, 10*s+4, f2);
-        C2D_DrawCircleSolid(cx+96, cy-1, 0.95f, 6*s+2, f1);
-        C2D_DrawTriangle(cx+92,cy-8,f1, cx+92,cy+6,f1, cx+96+26*s,cy-1,C2D_Color32(0xff,0xc0,0x40,0),0.9f);
+        u32 f0 = C2D_Color32(0xff,0xff,0xe0,(u8)(180*s));
+        u32 f1 = C2D_Color32(0xff,0xd0,0x60,(u8)(230*s));
+        u32 f2 = C2D_Color32(0xff,0x80,0x20,(u8)(170*s));
+        u32 ft = C2D_Color32(0xff,0xb0,0x30,0);
+        C2D_DrawCircleSolid(cx+96, cy-1, 0.91f, 14*s+5, f2);
+        C2D_DrawCircleSolid(cx+96, cy-1, 0.93f, 8*s+3,  f1);
+        C2D_DrawCircleSolid(cx+96, cy-1, 0.96f, 4*s+1,  f0);
+        C2D_DrawTriangle(cx+90,cy-9,f1, cx+90,cy+7,f1, cx+98+30*s,cy-1,ft, 0.92f);
+        C2D_DrawTriangle(cx+90,cy-5,f0, cx+90,cy+3,f0, cx+96+20*s,cy-1,ft, 0.94f);
     }
 }
 
@@ -199,11 +298,30 @@ static void renderTopGame(){
     float sx=0, sy=0;
     if (fx.shake>0.3f){ sx=(frand()*2-1)*fx.shake; sy=(frand()*2-1)*fx.shake; }
 
-    // background
+    // background gradient
     C2D_DrawRectangle(0,0,0, TOP_W, SCR_H, Pal::bg0,Pal::bg0,Pal::bg1,Pal::bg1);
-    // table
-    C2D_DrawRectangle(0,150+sy,0.05f, TOP_W, 90, C2D_Color32(0x2a,0x16,0x12,0xFF),C2D_Color32(0x2a,0x16,0x12,0xFF),C2D_Color32(0x15,0x0b,0x09,0xFF),C2D_Color32(0x15,0x0b,0x09,0xFF));
-    RS(0,150+sy,TOP_W,2, C2D_Color32(0x55,0x2c,0x18,0xFF));
+
+    // ambient overhead lamp glow (layered circles)
+    for (int li=6; li>=0; li--){
+        float r = 60.f + li*22.f;
+        u8 a = (u8)(14 - li*1.5f);
+        C2D_DrawCircleSolid(TOP_W/2.f+sx, -20.f+sy, 0.06f, r, C2D_Color32(0xd0,0xb0,0x60,a));
+    }
+
+    // table surface
+    C2D_DrawRectangle(0,152+sy,0.05f, TOP_W, 90,
+        C2D_Color32(0x2e,0x18,0x14,0xFF), C2D_Color32(0x2e,0x18,0x14,0xFF),
+        C2D_Color32(0x14,0x0a,0x08,0xFF), C2D_Color32(0x14,0x0a,0x08,0xFF));
+    // table edge highlight
+    RS(0,152+sy,TOP_W,3, C2D_Color32(0x60,0x34,0x1c,0xFF));
+    RS(0,153+sy,TOP_W,1, C2D_Color32(0x80,0x50,0x28,0xFF));
+    // wood grain lines
+    for (int wi=0;wi<6;wi++){
+        float wy = 160.f + wi*12.f + sy;
+        RS(0, wy, TOP_W, 1, C2D_Color32(0x20,0x10,0x0c,0x60));
+    }
+    // green baize cloth center
+    RS(60,158+sy, 280, 30, C2D_Color32(0x16,0x2e,0x1a,0x60));
 
     // header
     drawText(8, 6, 0.5f, Pal::textDim, ALN_L, "ROUND %d / %d", game.round, game.maxRounds);
@@ -279,6 +397,65 @@ static void renderTopGame(){
 }
 
 // ---------------------------------------------------------------------------
+//  ITEM ICONS — small geometric symbols per item type
+// ---------------------------------------------------------------------------
+static void drawItemIcon(float cx, float cy, Item it){
+    switch(it){
+        case IT_GLASS:  // magnifying glass: circle + handle
+            C2D_DrawCircleSolid(cx-1, cy-3, 0.6f, 7, C2D_Color32(0x1a,0x50,0x90,0xFF));
+            C2D_DrawCircleSolid(cx-1, cy-3, 0.65f, 5, C2D_Color32(0x30,0x80,0xd0,0xFF));
+            RS(cx+4, cy+1, 3, 9, C2D_Color32(0xb0,0x88,0x40,0xFF));
+            RS(cx+5, cy+9, 5, 3, C2D_Color32(0x90,0x68,0x28,0xFF));
+            break;
+        case IT_CIGS:   // cigarette: white stick, orange tip
+            RS(cx-10, cy-2, 18, 5, C2D_Color32(0xf0,0xec,0xe4,0xFF));
+            RS(cx+7,  cy-2, 4, 5, C2D_Color32(0xe0,0x78,0x28,0xFF));
+            RS(cx-10, cy-2, 2, 5, C2D_Color32(0xd0,0xcc,0xc0,0xFF));
+            break;
+        case IT_BEER:   // beer can
+            RS(cx-5, cy-8, 10, 16, C2D_Color32(0xd8,0xa8,0x1c,0xFF));
+            RS(cx-5, cy-8, 10, 3,  C2D_Color32(0xa8,0xa8,0xb0,0xFF));
+            RS(cx-5, cy+5,  10, 3,  C2D_Color32(0xa8,0xa8,0xb0,0xFF));
+            RS(cx-4, cy-4, 8, 8, C2D_Color32(0xf0,0xc0,0x2c,0xFF));
+            break;
+        case IT_CUFFS:  // two circles linked
+            C2D_DrawCircleSolid(cx-6, cy, 0.6f, 5, C2D_Color32(0x98,0x98,0xa8,0xFF));
+            C2D_DrawCircleSolid(cx+6, cy, 0.6f, 5, C2D_Color32(0x98,0x98,0xa8,0xFF));
+            C2D_DrawCircleSolid(cx-6, cy, 0.65f, 3, C2D_Color32(0x60,0x60,0x70,0xFF));
+            C2D_DrawCircleSolid(cx+6, cy, 0.65f, 3, C2D_Color32(0x60,0x60,0x70,0xFF));
+            RS(cx-4, cy-1, 8, 2, C2D_Color32(0x80,0x80,0x90,0xFF));
+            break;
+        case IT_SAW:    // blade + teeth
+            RS(cx-11, cy-2, 22, 5, C2D_Color32(0xc0,0xc2,0xcc,0xFF));
+            RS(cx-11, cy-2, 22, 2, C2D_Color32(0xe0,0xe2,0xec,0xFF));
+            for(int ti=0;ti<5;ti++) RS(cx-10+ti*4, cy-6, 3, 4, C2D_Color32(0xb0,0xb2,0xbc,0xFF));
+            break;
+        case IT_ADREN:  // syringe
+            RS(cx-1, cy-9, 3, 14, C2D_Color32(0xd0,0xd8,0xff,0xFF));
+            RS(cx-4, cy-5, 9, 2,  C2D_Color32(0xe0,0x40,0x40,0xFF));
+            RS(cx-4, cy-1, 9, 2,  C2D_Color32(0xe0,0x40,0x40,0xFF));
+            RS(cx,   cy+5, 1, 5,  C2D_Color32(0xc0,0xc8,0xe0,0xFF));
+            break;
+        case IT_PHONE:  // phone shape
+            RS(cx-5, cy-9, 10, 18, C2D_Color32(0x28,0x28,0x38,0xFF));
+            RS(cx-4, cy-8, 8, 13,  C2D_Color32(0x38,0x78,0xd0,0xFF));
+            C2D_DrawCircleSolid(cx, cy+7, 0.65f, 1.5f, C2D_Color32(0xa0,0xa0,0xb0,0xFF));
+            break;
+        case IT_INVERT: // up+down arrows
+            C2D_DrawTriangle(cx, cy-10, Pal::amber, cx-6,cy-4, Pal::amber, cx+6,cy-4, Pal::amber, 0.6f);
+            C2D_DrawTriangle(cx, cy+10, Pal::amber, cx-6,cy+4, Pal::amber, cx+6,cy+4, Pal::amber, 0.6f);
+            RS(cx-1, cy-4, 2, 8, Pal::amber);
+            break;
+        case IT_MEDICINE: // pill + cross
+            C2D_DrawCircleSolid(cx, cy, 0.6f, 8, C2D_Color32(0x70,0x20,0x20,0xFF));
+            RS(cx-5, cy-2, 10, 4, C2D_Color32(0xd8,0xdc,0xe0,0xFF));
+            RS(cx-2, cy-5, 4, 10, C2D_Color32(0xd8,0xdc,0xe0,0xFF));
+            break;
+        default: break;
+    }
+}
+
+// ---------------------------------------------------------------------------
 //  BOTTOM SCREEN — controls
 // ---------------------------------------------------------------------------
 static const float ITEM_X=6, ITEM_Y=30, ITEM_W=48, ITEM_H=40, ITEM_GX=50, ITEM_GY=44;
@@ -314,10 +491,10 @@ static void renderBottomGame(){
         drawPanel(x,y,ITEM_W,ITEM_H, fill, sel?Pal::brass:Pal::line);
         if (has){
             Item it=game.player.items[i];
-            drawText(x+ITEM_W/2, y+8, 0.42f, Pal::text, ALN_C, "%s", itemShort(it));
-            drawText(x+ITEM_W/2, y+24, 0.34f, Pal::textMute, ALN_C, "%s", it==IT_SAW?"x2": it==IT_CIGS?"+1":"");
+            drawItemIcon(x+ITEM_W/2, y+16, it);
+            drawText(x+ITEM_W/2, y+28, 0.34f, sel?Pal::brass:Pal::textDim, ALN_C, "%s", itemShort(it));
         } else {
-            drawText(x+ITEM_W/2, y+14, 0.5f, Pal::textMute, ALN_C, "-");
+            drawText(x+ITEM_W/2, y+15, 0.5f, Pal::textMute, ALN_C, "-");
         }
     }
 
@@ -333,7 +510,7 @@ static void renderBottomGame(){
 
     // description / log panel
     float ly=126;
-    drawPanel(6, ly, BOT_W-12, SCR_H-ly-6, C2D_Color32(0x12,0x0f,0x10,0xFF), Pal::line);
+    drawPanel(6, ly, BOT_W-12, SCR_H-ly-28, C2D_Color32(0x12,0x0f,0x10,0xFF), Pal::line);
     if (descIt!=IT_NONE)
         drawText(12, ly+6, 0.40f, Pal::amber, ALN_L, "%s", itemDesc(descIt));
     else if (uiSel==8) drawText(12, ly+6, 0.40f, Pal::amber, ALN_L, "Fire at the Dealer. Ends your turn.");
@@ -341,7 +518,7 @@ static void renderBottomGame(){
 
     // last log lines
     int n=(int)game.log.size();
-    int lines=4;
+    int lines=3;
     for (int i=0;i<lines;i++){
         int idx=n-lines+i;
         if (idx<0) continue;
@@ -349,8 +526,10 @@ static void renderBottomGame(){
         drawText(12, ly+24+i*16, 0.38f, c, ALN_L, "%s", game.log[idx].c_str());
     }
 
-    // controls hint
-    drawText(BOT_W/2, SCR_H-2, 0.34f, Pal::textMute, ALN_C, "");
+    // controls hint bar
+    RS(6, SCR_H-24, BOT_W-12, 20, C2D_Color32(0x10,0x0c,0x0e,0xFF));
+    RS(6, SCR_H-24, BOT_W-12, 1,  Pal::line);
+    drawText(BOT_W/2, SCR_H-18, 0.36f, Pal::textMute, ALN_C, "X:DEALER  Y:SELF  A:USE  B:BACK");
 
     // adrenaline overlay
     if (adrenMode){
@@ -532,8 +711,17 @@ static void renderGameOver(){
 
 static void renderInfoBottom(const char* title, const char* sub){
     C2D_DrawRectangle(0,0,0, BOT_W, SCR_H, Pal::bg0,Pal::bg0,Pal::bg1,Pal::bg1);
-    drawText(BOT_W/2, 90, 0.6f, Pal::textDim, ALN_C, "%s", title);
-    if (sub) drawText(BOT_W/2, 120, 0.4f, Pal::textMute, ALN_C, "%s", sub);
+    // decorative shell icons
+    drawShellIcon(BOT_W/2-36, 48, 16, 36, 1);
+    drawShellIcon(BOT_W/2+20, 48, 16, 36, 0);
+    drawText(BOT_W/2, 92, 0.55f, Pal::textDim, ALN_C, "%s", title);
+    if (sub) drawText(BOT_W/2, 118, 0.4f, Pal::textMute, ALN_C, "%s", sub);
+    // divider
+    RS(40, 134, BOT_W-80, 1, Pal::line);
+    // controls footer
+    drawText(BOT_W/2, 148, 0.38f, Pal::textMute, ALN_C, "D-Pad: navigate");
+    drawText(BOT_W/2, 165, 0.38f, Pal::textMute, ALN_C, "A: confirm   B: back");
+    drawText(BOT_W/2, 182, 0.38f, Pal::textMute, ALN_C, "START: select/advance");
     if (g_settings.vignette) drawVignette(BOT_W,SCR_H,0.7f);
 }
 
@@ -634,7 +822,6 @@ static void handleGameTouch(touchPosition tp, u32 kDown){
 //  MAIN
 // ---------------------------------------------------------------------------
 int main(int argc, char** argv){
-    romfsInit(); // harmless if no romfs
     gfxInitDefault();
     C3D_Init(C3D_DEFAULT_CMDBUF_SIZE);
     C2D_Init(C2D_DEFAULT_MAX_OBJECTS);
@@ -682,7 +869,7 @@ int main(int argc, char** argv){
                     if (menuSel==0){ startNewGame(); state=ST_GAME; }
                     else if (menuSel==1){ howScroll=0; state=ST_HOWTO; }
                     else if (menuSel==2){ setSel=1; state=ST_SETTINGS; }
-                    else if (menuSel==3){ aptSetChainloader(0,0); goto cleanup; }
+                    else if (menuSel==3){ goto cleanup; }
                 }
                 break;
             case ST_HOWTO:
@@ -786,6 +973,5 @@ cleanup:
     C2D_Fini();
     C3D_Fini();
     gfxExit();
-    romfsExit();
     return 0;
 }
