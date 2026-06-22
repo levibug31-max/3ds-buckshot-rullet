@@ -22,6 +22,7 @@ enum AppState { ST_SPLASH, ST_MENU, ST_HOWTO, ST_SETTINGS, ST_GAME, ST_GAMEOVER 
 struct Particle { float x,y,vx,vy,life,max; u32 col; };
 struct Fx {
     float shake=0, flash=0, dealerHurt=0, playerHurt=0, recoil=0, eyeGlow=0;
+    float blackout=0;          // screen cut-to-black when the player is hit
     std::vector<Particle> parts;
 };
 
@@ -97,7 +98,8 @@ static void applyShotFx(const ActionResult& r, Actor target, float mx, float my)
     if (r.fired && r.wasLive){
         if (g_settings.muzzleFlash) fx.flash = 1.0f;
         if (g_settings.screenShake) fx.shake = 9.0f;
-        if (target==ACTOR_DEALER) fx.dealerHurt = 1.0f; else fx.playerHurt = 1.0f;
+        if (target==ACTOR_DEALER){ fx.dealerHurt = 1.0f; }
+        else { fx.playerHurt = 1.0f; fx.blackout = 1.0f; }  // taking a live round cuts to black
         spawnSparks(mx, my, 22, Pal::amber);
         spawnSparks(mx, my, 10, Pal::red);
     } else if (r.fired){
@@ -114,6 +116,7 @@ static void updateFx(float dt){
     fx.recoil    *= expf(-dt*9.f);
     fx.dealerHurt*= expf(-dt*4.f);
     fx.playerHurt*= expf(-dt*4.f);
+    fx.blackout  *= expf(-dt*2.0f);   // holds dark, then fades back in
     fx.eyeGlow = 0.5f + 0.5f*sinf((float)svcGetSystemTick()/TICKS_PER_SEC*2.0f);
     for (size_t i=0;i<fx.parts.size();){
         Particle& p = fx.parts[i];
@@ -152,84 +155,130 @@ static void drawHealthPips(float x, float y, int lives, int maxLives, u32 col, f
     }
 }
 
-// The Dealer: a pale, mannequin-like figure seated across the table, facing you.
-static void drawDealer(float cx, float cy, float hurt){
-    u32 suit  = C2D_Color32(0x12,0x10,0x14,0xFF);  // near-black suit
-    u32 suitE = C2D_Color32(0x08,0x07,0x0a,0xFF);
-    u32 bone  = C2D_Color32(0xcf,0xc8,0xba,0xFF);  // pale bone skin
-    u32 boneS = C2D_Color32(0x9c,0x95,0x88,0xFF);  // shaded bone
-    u32 hollow= C2D_Color32(0x14,0x10,0x12,0xFF);  // eye/socket cavity
+static inline u8 lerp8(u8 a, u8 b, float t){ return (u8)(a + (b-a)*t); }
+static inline u32 lerpCol(u32 a, u32 b, float t){
+    return C2D_Color32(
+        lerp8(a&0xFF,b&0xFF,t), lerp8((a>>8)&0xFF,(b>>8)&0xFF,t),
+        lerp8((a>>16)&0xFF,(b>>16)&0xFF,t), lerp8((a>>24)&0xFF,(b>>24)&0xFF,t));
+}
 
-    // chair back behind the figure
-    RS(cx-50, cy-66, 100, 10, C2D_Color32(0x1c,0x16,0x18,0xFF));
-    RS(cx-46, cy-58, 92,  64, C2D_Color32(0x14,0x11,0x13,0xFF));
+// The Dealer: a large floating pale head + two floating hands (no body), as in
+// the real game. Empty eye sockets; a toothy grin that becomes a pained scowl
+// when shot; the head cracks and bleeds as it loses lives; red eyes only ignite
+// once it is finally killed.
+static void drawDealer(float cx, float cy, int lives, int maxLives, float hurt, bool dead){
+    float dmg = maxLives>0 ? 1.f - (float)lives/(float)maxLives : 0.f;
+    if (dmg<0) dmg=0;
+    if (dmg>1) dmg=1;
 
-    // arms / sleeves reaching onto the table
-    RS(cx-60, cy+6, 24, 40, suit);
-    RS(cx+36, cy+6, 24, 40, suit);
-    RS(cx-60, cy+6, 2, 40, suitE);
-    RS(cx+58, cy+6, 2, 40, suitE);
+    // recoil jitter + forward lunge when freshly shot ("emerging" scare)
+    float jx = (frand()*2-1)*hurt*3.f;
+    float jy = (frand()*2-1)*hurt*2.f;
+    cx += jx; cy += jy;
+    float lunge = 1.f + hurt*0.06f;
 
-    // pale skeletal hands resting on the table
+    // pale flesh, draining to a grey corpse pallor as damage mounts
+    u32 fleshHi = lerpCol(C2D_Color32(0xdc,0xcc,0xc0,0xFF), C2D_Color32(0x9c,0x9a,0x9a,0xFF), dmg);
+    u32 flesh   = lerpCol(C2D_Color32(0xc6,0xb4,0xa8,0xFF), C2D_Color32(0x84,0x82,0x82,0xFF), dmg);
+    u32 fleshSh = lerpCol(C2D_Color32(0x96,0x84,0x7a,0xFF), C2D_Color32(0x56,0x55,0x56,0xFF), dmg);
+    u32 hollow  = C2D_Color32(0x0a,0x08,0x0a,0xFF);
+    u32 blood   = C2D_Color32(0x86,0x10,0x10,0xFF);
+
+    float hw = 38*lunge, hh = 46*lunge;   // head half-extents
+
+    // floating hands resting on the near table edge
     for (int s=-1; s<=1; s+=2){
-        float hx = cx + s*48;
-        C2D_DrawCircleSolid(hx, cy+44, 0.28f, 9, bone);
-        for (int f=0; f<4; f++) RS(hx-7+f*4, cy+44, 3, 9, bone);   // fingers
-        RS(hx-9+ (s>0?16:0), cy+46, 3, 7, bone);                   // thumb
+        float hx = cx + s*72, hyy = 150;
+        C2D_DrawEllipse(hx-13, hyy-6, 0.28f, 26, 16, fleshSh,fleshSh,flesh,flesh);
+        for (int f=0; f<4; f++) RS(hx-11+f*6, hyy-12, 4, 12, flesh);  // fingers
+        RS(hx + s*12 - 2, hyy-4, 5, 9, fleshSh);                      // thumb
     }
 
-    // torso / suit jacket
-    drawPanel(cx-36, cy-8, 72, 56, suit, C2D_Color32(0x2a,0x22,0x26,0xFF));
+    // soft shadow/halo behind the floating head
+    C2D_DrawEllipse(cx-hw-6, cy-hh-6, 0.18f, (hw+6)*2, (hh+6)*2,
+        C2D_Color32(0,0,0,90),C2D_Color32(0,0,0,90),C2D_Color32(0,0,0,0),C2D_Color32(0,0,0,0));
 
-    // white shirt + collar V
-    u32 shirt = C2D_Color32(0xc4,0xc0,0xb8,0xFF);
-    C2D_DrawTriangle(cx-12,cy-8, shirt, cx+12,cy-8, shirt, cx, cy+18, shirt, 0.3f);
-    // black tie
-    u32 tie = C2D_Color32(0x0c,0x0a,0x0e,0xFF);
-    C2D_DrawTriangle(cx-4,cy-4, tie, cx+4,cy-4, tie, cx+1, cy+30, tie, 0.34f);
-    RS(cx-3, cy-7, 6, 4, tie);
+    // head (elongated pale dome)
+    C2D_DrawEllipse(cx-hw, cy-hh, 0.30f, hw*2, hh*2, fleshHi,fleshHi,flesh,flesh);
+    // cheek/jaw shading
+    C2D_DrawEllipse(cx-hw, cy+hh*0.1f, 0.31f, hw*2, hh*0.9f,
+        fleshSh,fleshSh, C2D_Color32(0,0,0,0),C2D_Color32(0,0,0,0));
+    // brow ridge
+    RS(cx-26, cy-16, 52, 3, fleshSh);
 
-    // lapels
-    C2D_DrawTriangle(cx-36,cy-8, suit, cx-8,cy-8, suit, cx-22,cy+30, suitE, 0.22f);
-    C2D_DrawTriangle(cx+36,cy-8, suit, cx+8,cy-8, suit, cx+22,cy+30, suitE, 0.22f);
-    // shoulders
-    C2D_DrawTriangle(cx-36,cy+4, suit, cx-58,cy+42, suit, cx-26,cy+46, suit, 0.21f);
-    C2D_DrawTriangle(cx+36,cy+4, suit, cx+58,cy+42, suit, cx+26,cy+46, suit, 0.21f);
+    // deep hollow eye sockets (no eyes during play)
+    C2D_DrawEllipse(cx-26, cy-20, 0.40f, 22, 18, hollow,hollow,hollow,hollow);
+    C2D_DrawEllipse(cx+4,  cy-20, 0.40f, 22, 18, hollow,hollow,hollow,hollow);
+    // socket inner shadow on the flesh
+    C2D_DrawEllipse(cx-27, cy-22, 0.39f, 24, 8, fleshSh,fleshSh,
+        C2D_Color32(0,0,0,0),C2D_Color32(0,0,0,0));
 
-    // pale neck
-    RS(cx-7, cy-18, 14, 12, boneS);
-
-    // skull-like head (pale, elongated)
-    C2D_DrawEllipse(cx-17, cy-50, 0.3f, 34, 40, bone,bone,bone,bone);
-    // cheek shading
-    C2D_DrawEllipse(cx-17, cy-38, 0.31f, 34, 18, boneS,boneS,
-                    C2D_Color32(0xcf,0xc8,0xba,0x00),C2D_Color32(0xcf,0xc8,0xba,0x00));
-    // brow ridge shadow
-    RS(cx-13, cy-40, 26, 2, boneS);
-
-    // hollow eye sockets
-    C2D_DrawEllipse(cx-15, cy-44, 0.4f, 12, 11, hollow,hollow,hollow,hollow);
-    C2D_DrawEllipse(cx+3,  cy-44, 0.4f, 12, 11, hollow,hollow,hollow,hollow);
-
-    // glowing eyes inside the sockets
-    float ge = 0.40f + 0.60f*fx.eyeGlow;
-    u32 halo = C2D_Color32(0xff,(u8)(0x40*ge),(u8)(0x20*ge),(u8)(70*ge));
-    u32 core = C2D_Color32((u8)(0xd0+0x2f*ge),(u8)(0x20*ge),(u8)(0x20*ge),0xFF);
-    C2D_DrawCircleSolid(cx-9, cy-38, 0.42f, 5.0f, halo);
-    C2D_DrawCircleSolid(cx+9, cy-38, 0.42f, 5.0f, halo);
-    C2D_DrawCircleSolid(cx-9, cy-38, 0.45f, 2.6f, core);
-    C2D_DrawCircleSolid(cx+9, cy-38, 0.45f, 2.6f, core);
+    // once dead: red delivery-system eyes ignite in the sockets
+    if (dead){
+        float ge = 0.55f + 0.45f*fx.eyeGlow;
+        u32 halo = C2D_Color32(0xff,0x20,0x10,(u8)(120*ge));
+        u32 core = C2D_Color32(0xff,(u8)(0x40*ge),0x20,0xFF);
+        C2D_DrawCircleSolid(cx-15, cy-11, 0.45f, 7.f, halo);
+        C2D_DrawCircleSolid(cx+15, cy-11, 0.45f, 7.f, halo);
+        C2D_DrawCircleSolid(cx-15, cy-11, 0.47f, 3.4f, core);
+        C2D_DrawCircleSolid(cx+15, cy-11, 0.47f, 3.4f, core);
+    }
 
     // nasal cavity
-    C2D_DrawTriangle(cx, cy-34, hollow, cx-3, cy-28, hollow, cx+3, cy-28, hollow, 0.44f);
+    C2D_DrawTriangle(cx, cy-4, hollow, cx-4, cy+8, hollow, cx+4, cy+8, hollow, 0.44f);
 
-    // gritted-teeth mouth line
-    RS(cx-11, cy-24, 22, 5, hollow);
-    for (int t=0;t<6;t++) RS(cx-10+t*4, cy-24, 1, 5, bone);
+    // ---- mouth: toothy grin, or a pained scowl when shot / badly hurt ----
+    bool scowl = (hurt>0.22f) || (dmg>0.66f);
+    float curve = scowl ? -1.f : 1.f;       // +smile / -frown
+    float mx = cx, my = cy+26, mhw = 26;
+    u32 tooth = lerpCol(C2D_Color32(0xe6,0xdc,0xcc,0xFF), C2D_Color32(0xb0,0xa6,0x9a,0xFF), dmg);
+    int cols = 18;
+    for (int i=0;i<cols;i++){
+        float fx2 = (float)i/(cols-1);            // 0..1
+        float xx = mx - mhw + fx2*2*mhw;
+        float n  = (xx-mx)/mhw;                    // -1..1
+        float yy = my + curve*7.f*(1.f - n*n);     // parabola
+        float colw = (2*mhw)/cols + 1;
+        // dark mouth interior
+        RS(xx, yy-7, colw, 14, hollow);
+        // teeth (skip some at high damage for a broken look)
+        bool missing = (dmg>0.4f && (i%5)== ((int)(dmg*5))%5) ||
+                       (dmg>0.75f && (i%3)==1);
+        if (!missing && (i%2==0))
+            RS(xx+1, yy-6, colw-2, 12, tooth);
+    }
+    // lips
+    for (int i=0;i<cols;i++){
+        float fx2=(float)i/(cols-1); float xx=mx-mhw+fx2*2*mhw; float n=(xx-mx)/mhw;
+        float yy=my+curve*7.f*(1.f-n*n);
+        RS(xx, yy-8, (2*mhw)/cols+1, 2, fleshSh);
+    }
 
-    // hurt flash overlay
+    // ---- progressive damage: cracks, chips and blood ----
+    if (dmg>0.15f){
+        // crack from the right brow
+        C2D_DrawTriangle(cx+10,cy-26, hollow, cx+13,cy-26, hollow, cx+20,cy-6, hollow, 0.45f);
+    }
+    if (dmg>0.45f){
+        // crack across the left cheek + a chipped notch on the skull edge
+        C2D_DrawTriangle(cx-22,cy-2, hollow, cx-19,cy-2, hollow, cx-8,cy+14, hollow, 0.45f);
+        C2D_DrawEllipse(cx-hw+2, cy-hh+8, 0.46f, 12, 12, Pal::bg1,Pal::bg1,Pal::bg1,Pal::bg1);
+        // blood from the right socket
+        RS(cx+13, cy-10, 3, 16+(int)(dmg*14), blood);
+    }
+    if (dmg>0.75f){
+        // shattered jaw + heavy blood, a dark hole punched in the temple
+        C2D_DrawEllipse(cx+hw-14, cy-6, 0.47f, 16, 16, hollow,hollow,hollow,hollow);
+        RS(cx-3, my+6, 6, 20, blood);
+        RS(cx-16, cy+18, 3, 12, blood);
+        C2D_DrawTriangle(cx-10,cy+34, blood, cx+10,cy+34, blood, cx, cy+44, blood, 0.46f);
+    }
+
+    // hurt flash overlay (red), brightest right when struck
     if (hurt>0.01f)
-        RS(cx-58, cy-72, 116, 128, C2D_Color32(0xcc,0x1e,0x1e,(u8)(130*hurt)));
+        C2D_DrawEllipse(cx-hw-6, cy-hh-6, 0.5f, (hw+6)*2, (hh+6)*2,
+            C2D_Color32(0xcc,0x1e,0x1e,(u8)(150*hurt)),C2D_Color32(0xcc,0x1e,0x1e,(u8)(150*hurt)),
+            C2D_Color32(0xcc,0x1e,0x1e,(u8)(40*hurt)), C2D_Color32(0xcc,0x1e,0x1e,(u8)(40*hurt)));
 }
 
 // ---------------------------------------------------------------------------
@@ -407,7 +456,9 @@ static void renderTopGame(){
     C2D_DrawCircleSolid(TOP_W/2.f+sx, 16, 0.06f, 5, C2D_Color32(0xff,0xe6,0xa0,0xFF));
 
     // ---- the Dealer across the table ----
-    drawDealer(TOP_W/2.0f + sx*0.4f, 84+sy*0.4f, fx.dealerHurt);
+    bool dealerDead = game.over && game.playerWon;
+    drawDealer(TOP_W/2.0f + sx*0.4f, 80+sy*0.4f,
+               (int)(dispDealerLives+0.5f), game.dealer.maxLives, fx.dealerHurt, dealerDead);
 
     // ---- table (perspective: narrow at the dealer, wide at the player) ----
     u32 tTop = C2D_Color32(0x2a,0x16,0x12,0xFF);
@@ -518,6 +569,11 @@ static void renderTopGame(){
     if (fx.flash>0.02f)       RS(0,0,TOP_W,SCR_H, C2D_Color32(0xff,0xe8,0xc0,(u8)(80*fx.flash)));
     if (g_settings.scanlines) drawScanlines(TOP_W, SCR_H, 0.10f);
     drawDim(TOP_W, SCR_H, (100-g_settings.brightness)/100.f*0.6f);
+    // taking a live round to yourself cuts the world to black
+    if (fx.blackout>0.01f){
+        float b = fx.blackout>1?1:fx.blackout;
+        RS(0,0,TOP_W,SCR_H, C2D_Color32(0,0,0,(u8)(255*b)));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -674,6 +730,10 @@ static void renderBottomGame(){
 
     if (g_settings.vignette) drawVignette(BOT_W, SCR_H, 0.7f);
     drawDim(BOT_W, SCR_H, (100-g_settings.brightness)/100.f*0.6f);
+    if (fx.blackout>0.01f){
+        float b = fx.blackout>1?1:fx.blackout;
+        RS(0,0,BOT_W,SCR_H, C2D_Color32(0,0,0,(u8)(255*b)));
+    }
 }
 
 // ---------------------------------------------------------------------------
